@@ -469,4 +469,56 @@ class MainActivity : Activity() {
                 ui.post {
                     weatherTempTv.text = "$t°"
                     weatherStatusTv.text = txt
-                    weathe
+                    weatherSubTv.text = "المحسوسة $appT° • رطوبة $hum% • رياح $wind كم"
+                }
+            } catch (e: Throwable) { }
+
+            // مواقيت الصلاة لمدينة الرياض
+            try {
+                val t = JSONObject(URL("https://api.aladhan.com/v1/timingsByCity?city=Riyadh&country=SA&method=4").readText()).getJSONObject("data").getJSONObject("timings")
+                val list = listOf(
+                    "الفجر" to t.getString("Fajr").substring(0, 5),
+                    "الظهر" to t.getString("Dhuhr").substring(0, 5),
+                    "العصر" to t.getString("Asr").substring(0, 5),
+                    "المغرب" to t.getString("Maghrib").substring(0, 5),
+                    "العشاء" to t.getString("Isha").substring(0, 5)
+                )
+                val now = LocalTime.now()
+                val parsed = list.map { LocalTime.parse(it.second) }
+                val nextIdx = parsed.indexOfFirst { it.isAfter(now) }.let { if (it == -1) 0 else it }
+
+                ui.post {
+                    prayerRow.removeAllViews()
+                    for (i in list.indices) {
+                        val isNext = (i == nextIdx)
+                        val col = LinearLayout(this@MainActivity).apply {
+                            orientation = LinearLayout.VERTICAL
+                            gravity = Gravity.CENTER
+                            if (isNext) {
+                                background = glass(60, 12, Color.parseColor("#FFD166"), 1)
+                                setPadding(dp(10), dp(4), dp(10), dp(4))
+                            } else {
+                                setPadding(dp(8), dp(4), dp(8), dp(4))
+                            }
+                            addView(tv(11.5f, isNext, if (isNext) Color.parseColor("#FFD166") else Color.argb(170, 255, 255, 255)).apply {
+                                text = list[i].first
+                                gravity = Gravity.CENTER
+                            })
+                            addView(tv(12.5f, isNext, if (isNext) Color.WHITE else Color.argb(220, 255, 255, 255)).apply {
+                                val tp = LocalTime.parse(list[i].second)
+                                text = tp.format(DateTimeFormatter.ofPattern("h:mm", ar))
+                                gravity = Gravity.CENTER
+                            })
+                        }
+                        prayerRow.addView(col)
+                    }
+
+                    val diffMin = java.time.Duration.between(now, parsed[nextIdx]).toMinutes()
+                    nextPrayerTimerTv.text = if (diffMin > 0) "الأذان القادم: ${list[nextIdx].first} بعد $diffMin دقيقة" else "حان الآن وقت الصلاة"
+                }
+            } catch (e: Throwable) { }
+
+            ui.postDelayed({ updateOnlineData() }, 15 * 60 * 1000L)
+        }
+    }
+}
