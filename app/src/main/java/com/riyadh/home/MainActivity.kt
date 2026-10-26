@@ -390,7 +390,7 @@ class MainActivity : Activity() {
             private val iconView = object : View(context) {
                 private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     style = Paint.Style.STROKE
-                    strokeWidth = dp(2).toFloat()
+                    strokeWidth = 2f
                     strokeCap = Paint.Cap.ROUND
                     color = Color.WHITE
                 }
@@ -400,28 +400,28 @@ class MainActivity : Activity() {
                     val cy = height / 2f
                     when (type) {
                         IconType.WIFI -> {
-                            val r1 = dp(9).toFloat()
-                            val r2 = dp(5.5f).toFloat()
+                            val r1 = 9f * resources.displayMetrics.density
+                            val r2 = 5.5f * resources.displayMetrics.density
                             canvas.drawArc(cx - r1, cy - r1 + dp(3), cx + r1, cy + r1 + dp(3), 225f, 90f, false, paint)
                             canvas.drawArc(cx - r2, cy - r2 + dp(3), cx + r2, cy + r2 + dp(3), 225f, 90f, false, paint)
                             paint.style = Paint.Style.FILL
-                            canvas.drawCircle(cx, cy + dp(5).toFloat(), dp(1.6f).toFloat(), paint)
+                            canvas.drawCircle(cx, cy + dp(5).toFloat(), 1.6f * resources.displayMetrics.density, paint)
                             paint.style = Paint.Style.STROKE
                         }
                         IconType.SETTINGS -> {
-                            val r = dp(4.5f).toFloat()
+                            val r = 4.5f * resources.displayMetrics.density
                             canvas.drawCircle(cx, cy, r, paint)
                             for (i in 0 until 8) {
                                 val angle = Math.toRadians((i * 45).toDouble())
                                 canvas.drawLine(
                                     cx + (r + dp(1)) * Math.cos(angle).toFloat(), cy + (r + dp(1)) * Math.sin(angle).toFloat(),
-                                    cx + (r + dp(3f)) * Math.cos(angle).toFloat(), cy + (r + dp(3f)) * Math.sin(angle).toFloat(), paint
+                                    cx + (r + dp(3)) * Math.cos(angle).toFloat(), cy + (r + dp(3)) * Math.sin(angle).toFloat(), paint
                                 )
                             }
                         }
                         IconType.GRID -> {
-                            val s = dp(3f).toFloat()
-                            val g = dp(2.5f).toFloat()
+                            val s = 3f * resources.displayMetrics.density
+                            val g = 2.5f * resources.displayMetrics.density
                             canvas.drawRoundRect(cx - g - s, cy - g - s, cx - g / 2, cy - g / 2, 2f, 2f, paint)
                             canvas.drawRoundRect(cx + g / 2, cy - g - s, cx + g + s, cy - g / 2, 2f, 2f, paint)
                             canvas.drawRoundRect(cx - g - s, cy + g / 2, cx - g / 2, cy + g + s, 2f, 2f, paint)
@@ -479,7 +479,7 @@ class MainActivity : Activity() {
                 p.color = Color.parseColor("#FFB703")
                 c.drawCircle(cx, cy, width * 0.28f, p)
                 p.style = Paint.Style.STROKE
-                p.strokeWidth = dp(2).toFloat()
+                p.strokeWidth = 2f
                 p.strokeCap = Paint.Cap.ROUND
                 for (i in 0 until 8) {
                     val a = Math.toRadians((i * 45).toDouble())
