@@ -38,6 +38,7 @@ class MainActivity : Activity() {
 
     private lateinit var mainScroll: ScrollView
     private lateinit var rootContainer: LinearLayout
+    private lateinit var backgroundImageView: ImageView
     private lateinit var favDockContainer: LinearLayout
     private lateinit var favRow: LinearLayout
     private lateinit var allGrid: GridLayout
@@ -56,19 +57,14 @@ class MainActivity : Activity() {
 
     private var allApps = mutableListOf<ResolveInfo>()
     private val logoCache = ConcurrentHashMap<String, Bitmap>()
+    private val bgCache = ConcurrentHashMap<String, Bitmap>()
 
-    // ثيمات الخلفية السينمائية (Argon Ambient Themes)
-    private val themes = listOf(
-        "سماء الغيوم السينمائية" to intArrayOf(0xFF1E324A.toInt(), 0xFF3A5573.toInt(), 0xFF142030.toInt()),
-        "ليالي أرجون العميقة (OLED)" to intArrayOf(0xFF080C16.toInt(), 0xFF121C32.toInt(), 0xFF1B142E.toInt()),
-        "الشفق القطبي الفاخر" to intArrayOf(0xFF0A2229.toInt(), 0xFF153B44.toInt(), 0xFF0B1724.toInt()),
-        "الرمادي التيتانيوم (Apple TV)" to intArrayOf(0xFF1C2026.toInt(), 0xFF2E3440.toInt(), 0xFF14171C.toInt()),
-        "الأفق الذهبي الملكي" to intArrayOf(0xFF1F1924.toInt(), 0xFF332630.toInt(), 0xFF12131A.toInt())
-    )
+    // خلفية السيارة والحصان التي اخترتها كخلفية رئيسية
+    private val defaultCustomBgUrl = "https://images.unsplash.com/photo-1552519507-da3b142c6e3d?q=80&w=1920&auto=format&fit=crop"
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    private fun glass(alpha: Int = 34, radius: Int = 22, strokeColor: Int = Color.argb(55, 255, 255, 255), strokeDp: Int = 1) = GradientDrawable().apply {
+    private fun glass(alpha: Int = 38, radius: Int = 22, strokeColor: Int = Color.argb(60, 255, 255, 255), strokeDp: Int = 1) = GradientDrawable().apply {
         setColor(Color.argb(alpha, 255, 255, 255))
         cornerRadius = dp(radius).toFloat()
         if (strokeDp > 0) setStroke(dp(strokeDp), strokeColor)
@@ -109,75 +105,121 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun applySelectedTheme() {
-        val idx = prefs.getInt("theme_idx", 0).coerceIn(0, themes.size - 1)
-        mainScroll.background = GradientDrawable(GradientDrawable.Orientation.TL_BR, themes[idx].second)
+    private fun applyCustomBackground() {
+        val bgUrl = prefs.getString("custom_bg_url", defaultCustomBgUrl) ?: defaultCustomBgUrl
+        val cached = bgCache[bgUrl]
+        if (cached != null) {
+            backgroundImageView.setImageBitmap(cached)
+            return
+        }
+        thread {
+            try {
+                val conn = URL(bgUrl).openConnection() as HttpURLConnection
+                conn.connectTimeout = 6000
+                conn.readTimeout = 6000
+                val bmp = BitmapFactory.decodeStream(conn.inputStream)
+                if (bmp != null) {
+                    bgCache[bgUrl] = bmp
+                    ui.post { backgroundImageView.setImageBitmap(bmp) }
+                }
+            } catch (e: Throwable) { }
+        }
     }
 
     private fun buildArgonInterface() {
+        val frameLayout = FrameLayout(this).apply {
+            layoutParams = ViewGroup.LayoutParams(-1, -1)
+            setBackgroundColor(0xFF0A0F18.toInt())
+        }
+
+        // الخلفية (صورة السيارة والحصان الفخمة) مع تغطية زجاجية داكنة خفيفة
+        backgroundImageView = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            layoutParams = ViewGroup.LayoutParams(-1, -1)
+        }
+        frameLayout.addView(backgroundImageView)
+        applyCustomBackground()
+
+        val darkOverlay = View(this).apply {
+            layoutParams = ViewGroup.LayoutParams(-1, -1)
+            setBackgroundColor(0x600A0F18.toInt()) // طبقة تعتيم سينمائية تبرز النصوص والبطاقات
+        }
+        frameLayout.addView(darkOverlay)
+
         mainScroll = ScrollView(this).apply {
             isVerticalScrollBarEnabled = false
             isFillViewport = true
+            layoutParams = ViewGroup.LayoutParams(-1, -1)
         }
-        applySelectedTheme()
 
         rootContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
             setPadding(dp(44), dp(20), dp(44), dp(36))
+            clipChildren = false
+            clipToPadding = false
         }
 
         // ==========================================
-        // 1. شريط النظام العلوي المينيمال (بنفس تصميم Apple TV 4K)
+        // 1. شريط النظام العلوي (الكبسولات المتوسعة بالتركيز)
         // ==========================================
         val statusHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(4), 0, dp(4), dp(10))
+            clipChildren = false
+            clipToPadding = false
         }
 
-        // فراغ مرن يدفع أيقونات النظام لأقصى اليمين/اليسار حسب الاتجاه
         statusHeader.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
 
-        val minimalIconsRow = LinearLayout(this).apply {
+        val interactiveCapsulesRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            clipChildren = false
+            clipToPadding = false
         }
 
-        miniClockTv = tv(14f, true, Color.argb(210, 255, 255, 255)).apply {
-            setPadding(dp(12), 0, dp(12), 0)
+        miniClockTv = tv(14f, true, Color.argb(220, 255, 255, 255)).apply {
+            setPadding(dp(10), 0, dp(14), 0)
         }
 
-        val wifiBtn = createMinimalVectorIcon(IconType.WIFI) { openInternalSettingsDialog() }
-        val settingsBtn = createMinimalVectorIcon(IconType.SETTINGS) { openInternalSettingsDialog() }
-        val gridBtn = createMinimalVectorIcon(IconType.GRID) {
+        val prayerCapsule = createExpandingCapsule("أوقات الصلاة", IconType.PRAYER) { openPrayerSettingsDialog() }
+        val sourcesCapsule = createExpandingCapsule("المصادر", IconType.SOURCES) { openSourcesDialog() }
+        val settingsCapsule = createExpandingCapsule("الإعدادات", IconType.SETTINGS) { openInternalSettingsDialog() }
+        val wifiCapsule = createExpandingCapsule("واي فاي", IconType.WIFI) { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) }
+        val gridCapsule = createExpandingCapsule("التطبيقات", IconType.GRID) {
             mainScroll.smoothScrollTo(0, dp(520))
             allGrid.getChildAt(0)?.requestFocus()
         }
 
-        minimalIconsRow.addView(gridBtn)
-        minimalIconsRow.addView(settingsBtn)
-        minimalIconsRow.addView(wifiBtn)
-        minimalIconsRow.addView(miniClockTv)
+        interactiveCapsulesRow.addView(gridCapsule)
+        interactiveCapsulesRow.addView(wifiCapsule)
+        interactiveCapsulesRow.addView(settingsCapsule)
+        interactiveCapsulesRow.addView(sourcesCapsule)
+        interactiveCapsulesRow.addView(prayerCapsule)
+        interactiveCapsulesRow.addView(miniClockTv)
 
-        statusHeader.addView(minimalIconsRow)
+        statusHeader.addView(interactiveCapsulesRow)
         rootContainer.addView(statusHeader)
 
         // ==========================================
-        // 2. القسم العلوي (الطقس والصلاة بنفس المقاس الهندسي + الساعة)
+        // 2. القسم العلوي (الطقس والصلاة متطابقين + الساعة)
         // ==========================================
         val topWidgetsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            clipChildren = false
+            clipToPadding = false
         }
 
         val widgetWidth = dp(235)
         val widgetHeight = dp(148)
 
-        // --- أ: ويدجت الطقس (الرياض) ---
+        // --- أ: بطاقة الطقس (الرياض) ---
         val wCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = glass(30, 22, Color.argb(65, 255, 255, 255), 1)
+            background = glass(35, 22, Color.argb(70, 255, 255, 255), 1)
             setPadding(dp(18), dp(12), dp(18), dp(12))
 
             val wHeader = LinearLayout(context).apply {
@@ -200,7 +242,7 @@ class MainActivity : Activity() {
             addView(tempRow)
 
             weatherStatusTv = tv(12.5f, true).apply { text = "سماء صافية" }
-            weatherSubTv = tv(11f, false, Color.argb(195, 255, 255, 255)).apply {
+            weatherSubTv = tv(11f, false, Color.argb(200, 255, 255, 255)).apply {
                 text = "المحسوسة 31° • الرطوبة 15%\nالرياح 9 كم/س"
                 setLineSpacing(0f, 1.15f)
             }
@@ -209,10 +251,10 @@ class MainActivity : Activity() {
         }
         topWidgetsRow.addView(wCard, LinearLayout.LayoutParams(widgetWidth, widgetHeight))
 
-        // --- ب: ويدجت مواقيت الصلاة (الرياض - مطابق بالمقاس) ---
+        // --- ب: بطاقة مواقيت الصلاة (الرياض) ---
         val pCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = glass(30, 22, Color.argb(65, 255, 255, 255), 1)
+            background = glass(35, 22, Color.argb(70, 255, 255, 255), 1)
             setPadding(dp(18), dp(10), dp(18), dp(10))
 
             addView(tv(13f, true, Color.argb(220, 255, 255, 255)).apply {
@@ -236,14 +278,14 @@ class MainActivity : Activity() {
 
         topWidgetsRow.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
 
-        // --- ج: الساعة السينمائية والتاريخ الهجري والميلادي ---
+        // --- ج: الساعة والتاريخ ---
         val clockBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.END
         }
-        clockTv = tv(72f, true).apply { gravity = Gravity.END; text = "12:55 م" }
+        clockTv = tv(72f, true).apply { gravity = Gravity.END; text = "1:13 م" }
         dayTv = tv(18f, true).apply { gravity = Gravity.END; text = "الإثنين" }
-        datesTv = tv(13f, false, Color.argb(215, 255, 255, 255)).apply {
+        datesTv = tv(13f, false, Color.argb(220, 255, 255, 255)).apply {
             gravity = Gravity.END
             setLineSpacing(0f, 1.2f)
         }
@@ -255,14 +297,14 @@ class MainActivity : Activity() {
         rootContainer.addView(topWidgetsRow)
 
         // ==========================================
-        // 3. شريط مباريات اليوم (مقاس موحد + شعارات الأندية الحقيقية)
+        // 3. مباريات اليوم بشعارات الأندية الآسيوية والعالمية الحقيقية
         // ==========================================
         val mHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(4), dp(14), 0, dp(6))
+            setPadding(dp(4), dp(16), 0, dp(6))
             addView(tv(15.5f, true).apply { text = "مباريات اليوم" })
-            addView(tv(11.5f, false, Color.argb(165, 255, 255, 255)).apply {
+            addView(tv(11.5f, false, Color.argb(170, 255, 255, 255)).apply {
                 text = " • 365Scores Live"
                 setPadding(dp(8), 0, 0, 0)
             })
@@ -273,6 +315,8 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, dp(2), 0, dp(10))
+            clipChildren = false
+            clipToPadding = false
         }
         val mScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
@@ -283,24 +327,23 @@ class MainActivity : Activity() {
         rootContainer.addView(mScroll, LinearLayout.LayoutParams(-1, -2))
 
         // ==========================================
-        // 4. الدوك السفلي للمفضلة (Apple TV 4K Glass Pill Dock)
+        // 4. الدوك السفلي للمفضلة (Apple TV 4K Style)
         // ==========================================
         val favHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(6), dp(6), 0, dp(6))
             addView(tv(15f, true).apply { text = "المفضلة" })
-            addView(tv(11.5f, false, Color.argb(170, 255, 255, 255)).apply {
+            addView(tv(11.5f, false, Color.argb(175, 255, 255, 255)).apply {
                 text = " (اضغط سهم تحت ⬇️ لفتح درج التطبيقات • علّق بـ OK للترتيب)"
                 setPadding(dp(10), 0, 0, 0)
             })
         }
         rootContainer.addView(favHeader)
 
-        // الحاوية الزجاجية العائمة حول تطبيقات المفضلة مثل صورة Apple TV 4K
         favDockContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = glass(28, 26, Color.argb(50, 255, 255, 255), 1)
+            background = glass(32, 26, Color.argb(60, 255, 255, 255), 1)
             setPadding(dp(14), dp(12), dp(14), dp(12))
             clipChildren = false
             clipToPadding = false
@@ -322,15 +365,15 @@ class MainActivity : Activity() {
         rootContainer.addView(favDockContainer, LinearLayout.LayoutParams(-1, -2))
 
         // ==========================================
-        // 5. درج جميع التطبيقات (عند الضغط على سهم لأسفل)
+        // 5. درج جميع التطبيقات الكامل
         // ==========================================
         val dHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(4), dp(36), 0, dp(12))
             addView(tv(17f, true, Color.parseColor("#4DEEEA")).apply { text = "جميع التطبيقات" })
-            addView(tv(12f, false, Color.argb(165, 255, 255, 255)).apply {
-                text = " • علّق بـ OK على أي تطبيق لتثبيته في المفضلة بالأعلى"
+            addView(tv(12f, false, Color.argb(170, 255, 255, 255)).apply {
+                text = " • علّق بـ OK على أي تطبيق لتثبيته في المفضلة"
                 setPadding(dp(10), 0, 0, 0)
             })
         }
@@ -345,84 +388,104 @@ class MainActivity : Activity() {
         }
         rootContainer.addView(allGrid, LinearLayout.LayoutParams(-1, -2))
 
-        mainScroll.addView(rootContainer)
-        setContentView(mainScroll)
+        frameLayout.addView(mainScroll)
+        setContentView(frameLayout)
     }
 
     // ==========================================
-    // رسم أيقونات النظام العلوية المفرغة (Vector Canvas Icons)
+    // الكبسولات العلوية المتوسعة عند التركيز (Expand on Focus)
     // ==========================================
-    enum class IconType { WIFI, SETTINGS, GRID }
+    enum class IconType { WIFI, SETTINGS, GRID, SOURCES, PRAYER }
 
-    private fun createMinimalVectorIcon(type: IconType, onClick: () -> Unit): View {
-        return object : View(this) {
-            private var focused = false
-            private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.STROKE
-                strokeWidth = dp(2).toFloat()
-                strokeCap = Paint.Cap.ROUND
-                color = Color.argb(215, 255, 255, 255)
+    private fun createExpandingCapsule(label: String, type: IconType, onClick: () -> Unit): View {
+        return object : LinearLayout(this) {
+            private var isFocusedState = false
+            private val titleTv = TextView(context).apply {
+                text = label
+                textSize = 12.5f
+                setTextColor(Color.WHITE)
+                setTypeface(null, Typeface.BOLD)
+                visibility = View.GONE
+                setPadding(dp(8), 0, dp(4), 0)
             }
-            private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.FILL
-                color = Color.argb(75, 255, 255, 255)
+            private val iconView = object : View(context) {
+                private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.STROKE
+                    strokeWidth = dp(2).toFloat()
+                    strokeCap = Paint.Cap.ROUND
+                    color = Color.WHITE
+                }
+                override fun onDraw(canvas: Canvas) {
+                    super.onDraw(canvas)
+                    val cx = width / 2f
+                    val cy = height / 2f
+                    when (type) {
+                        IconType.WIFI -> {
+                            val r1 = dp(9).toFloat()
+                            val r2 = dp(5.5f).toFloat()
+                            canvas.drawArc(cx - r1, cy - r1 + dp(3), cx + r1, cy + r1 + dp(3), 225f, 90f, false, paint)
+                            canvas.drawArc(cx - r2, cy - r2 + dp(3), cx + r2, cy + r2 + dp(3), 225f, 90f, false, paint)
+                            paint.style = Paint.Style.FILL
+                            canvas.drawCircle(cx, cy + dp(5).toFloat(), dp(1.6f).toFloat(), paint)
+                            paint.style = Paint.Style.STROKE
+                        }
+                        IconType.SETTINGS -> {
+                            val r = dp(4.5f).toFloat()
+                            canvas.drawCircle(cx, cy, r, paint)
+                            for (i in 0 until 8) {
+                                val angle = Math.toRadians((i * 45).toDouble())
+                                canvas.drawLine(
+                                    cx + (r + dp(1)) * Math.cos(angle).toFloat(), cy + (r + dp(1)) * Math.sin(angle).toFloat(),
+                                    cx + (r + dp(3f)) * Math.cos(angle).toFloat(), cy + (r + dp(3f)) * Math.sin(angle).toFloat(), paint
+                                )
+                            }
+                        }
+                        IconType.GRID -> {
+                            val s = dp(3f).toFloat()
+                            val g = dp(2.5f).toFloat()
+                            canvas.drawRoundRect(cx - g - s, cy - g - s, cx - g / 2, cy - g / 2, 2f, 2f, paint)
+                            canvas.drawRoundRect(cx + g / 2, cy - g - s, cx + g + s, cy - g / 2, 2f, 2f, paint)
+                            canvas.drawRoundRect(cx - g - s, cy + g / 2, cx - g / 2, cy + g + s, 2f, 2f, paint)
+                            canvas.drawRoundRect(cx + g / 2, cy + g / 2, cx + g + s, cy + g + s, 2f, 2f, paint)
+                        }
+                        IconType.SOURCES -> {
+                            canvas.drawRoundRect(cx - dp(7), cy - dp(5), cx + dp(7), cy + dp(4), 3f, 3f, paint)
+                            canvas.drawLine(cx - dp(3), cy + dp(6), cx + dp(3), cy + dp(6), paint)
+                            canvas.drawLine(cx, cy + dp(4), cx, cy + dp(6), paint)
+                        }
+                        IconType.PRAYER -> {
+                            canvas.drawArc(cx - dp(6), cy - dp(7), cx + dp(6), cy + dp(5), 180f, 180f, false, paint)
+                            canvas.drawLine(cx - dp(8), cy + dp(6), cx + dp(8), cy + dp(6), paint)
+                            canvas.drawLine(cx, cy - dp(9), cx, cy - dp(7), paint)
+                        }
+                    }
+                }
+            }.apply {
+                layoutParams = LinearLayout.LayoutParams(dp(20), dp(20))
             }
 
             init {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = glass(40, 16, Color.argb(80, 255, 255, 255), 1)
+                setPadding(dp(10), dp(8), dp(10), dp(8))
                 isFocusable = true
                 isClickable = true
+                clipChildren = false
                 setOnClickListener { onClick() }
-                setOnFocusChangeListener { v, f ->
-                    focused = f
-                    paint.color = if (f) Color.WHITE else Color.argb(210, 255, 255, 255)
-                    v.animate().scaleX(if (f) 1.2f else 1f).scaleY(if (f) 1.2f else 1f).setDuration(120).start()
-                    invalidate()
-                }
-            }
 
-            override fun onDraw(canvas: Canvas) {
-                super.onDraw(canvas)
-                val cx = width / 2f
-                val cy = height / 2f
-                if (focused) {
-                    canvas.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), dp(10).toFloat(), dp(10).toFloat(), bgPaint)
+                setOnFocusChangeListener { _, f ->
+                    isFocusedState = f
+                    titleTv.visibility = if (f) View.VISIBLE else View.GONE
+                    background = glass(if (f) 140 else 40, 16, if (f) Color.WHITE else Color.argb(80, 255, 255, 255), if (f) 2 else 1)
+                    animate().scaleX(if (f) 1.08f else 1f).scaleY(if (f) 1.08f else 1f).setDuration(120).start()
                 }
-                when (type) {
-                    IconType.WIFI -> {
-                        val r1 = dp(10).toFloat()
-                        val r2 = dp(6).toFloat()
-                        canvas.drawArc(cx - r1, cy - r1 + dp(4), cx + r1, cy + r1 + dp(4), 225f, 90f, false, paint)
-                        canvas.drawArc(cx - r2, cy - r2 + dp(4), cx + r2, cy + r2 + dp(4), 225f, 90f, false, paint)
-                        paint.style = Paint.Style.FILL
-                        canvas.drawCircle(cx, cy + dp(6).toFloat(), dp(1.8f).toFloat(), paint)
-                        paint.style = Paint.Style.STROKE
-                    }
-                    IconType.SETTINGS -> {
-                        val r = dp(5).toFloat()
-                        canvas.drawCircle(cx, cy, r, paint)
-                        for (i in 0 until 8) {
-                            val angle = Math.toRadians((i * 45).toDouble())
-                            val x1 = cx + (r + dp(1)) * Math.cos(angle).toFloat()
-                            val y1 = cy + (r + dp(1)) * Math.sin(angle).toFloat()
-                            val x2 = cx + (r + dp(3.5f)) * Math.cos(angle).toFloat()
-                            val y2 = cy + (r + dp(3.5f)) * Math.sin(angle).toFloat()
-                            canvas.drawLine(x1, y1, x2, y2, paint)
-                        }
-                    }
-                    IconType.GRID -> {
-                        val s = dp(3.5f).toFloat()
-                        val gap = dp(3f).toFloat()
-                        canvas.drawRoundRect(cx - gap - s, cy - gap - s, cx - gap / 2, cy - gap / 2, 2f, 2f, paint)
-                        canvas.drawRoundRect(cx + gap / 2, cy - gap - s, cx + gap + s, cy - gap / 2, 2f, 2f, paint)
-                        canvas.drawRoundRect(cx - gap - s, cy + gap / 2, cx - gap / 2, cy + gap + s, 2f, 2f, paint)
-                        canvas.drawRoundRect(cx + gap / 2, cy + gap / 2, cx + gap + s, cy + gap + s, 2f, 2f, paint)
-                    }
-                }
-            }
 
-            private fun dp(v: Float) = v * resources.displayMetrics.density
+                addView(iconView)
+                addView(titleTv)
+            }
         }.apply {
-            layoutParams = LinearLayout.LayoutParams(dp(34), dp(34)).apply { marginStart = dp(8) }
+            layoutParams = LinearLayout.LayoutParams(-2, dp(38)).apply { marginStart = dp(8) }
         }
     }
 
@@ -453,8 +516,83 @@ class MainActivity : Activity() {
     }
 
     // ==========================================
-    // لوحة الإعدادات الداخلية الذكية (من نفس الواجهة)
+    // قوائم الإعدادات والمصادر التفاعلية
     // ==========================================
+    private fun openSourcesDialog() {
+        val dialog = Dialog(this)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+        val sheet = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutDirection = View.LAYOUT_DIRECTION_RTL
+            background = glass(240, 22, Color.WHITE, 2).apply { setColor(0xEE141E30.toInt()) }
+            setPadding(dp(26), dp(20), dp(26), dp(20))
+        }
+
+        sheet.addView(tv(18f, true, Color.parseColor("#4DEEEA")).apply {
+            text = "📺 مصادر الإدخال (Video Sources)"
+            setPadding(0, 0, 0, dp(14))
+        })
+
+        val sources = listOf("HDMI 1", "HDMI 2", "HDMI 3", "AV / Composite", "USB Media Player", "VGA")
+        for (src in sources) {
+            val btn = LinearLayout(this).apply {
+                background = glass(40, 14)
+                setPadding(dp(16), dp(11), dp(16), dp(11))
+                isFocusable = true
+                isClickable = true
+                setOnClickListener {
+                    Toast.makeText(context, "تم التبديل إلى $src", Toast.LENGTH_SHORT).show()
+                    dialog.dismiss()
+                }
+                setOnFocusChangeListener { v, f ->
+                    v.background = glass(if (f) 120 else 40, 14, if (f) Color.WHITE else Color.TRANSPARENT, if (f) 2 else 0)
+                }
+                addView(tv(14f, true).apply { text = src })
+            }
+            sheet.addView(btn, LinearLayout.LayoutParams(dp(340), -2).apply { bottomMargin = dp(8) })
+        }
+
+        dialog.setContentView(sheet)
+        dialog.show()
+    }
+
+    private fun openPrayerSettingsDialog() {
+        val dialog = Dialog(this)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+        val sheet = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutDirection = View.LAYOUT_DIRECTION_RTL
+            background = glass(240, 22, Color.WHITE, 2).apply { setColor(0xEE141E30.toInt()) }
+            setPadding(dp(26), dp(20), dp(26), dp(20))
+            addView(tv(18f, true, Color.parseColor("#FFEAA7")).apply {
+                text = "🕌 إعدادات أوقات الصلاة"
+                setPadding(0, 0, 0, dp(12))
+            })
+            addView(tv(14f, false, Color.WHITE).apply {
+                text = "المدينة الحالية: الرياض (تقويم أم القرى)\nالحساب: الهيئة العامة للمساحة\n\nالمواقيت يتم تحديثها تلقائياً عبر الإنترنت بدقة."
+                setLineSpacing(0f, 1.3f)
+                setPadding(0, 0, 0, dp(16))
+            })
+        }
+        val closeBtn = LinearLayout(this).apply {
+            background = glass(50, 14)
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+            isFocusable = true
+            isClickable = true
+            setOnClickListener { dialog.dismiss() }
+            setOnFocusChangeListener { v, f -> v.background = glass(if (f) 120 else 50, 14, if (f) Color.WHITE else Color.TRANSPARENT, if (f) 2 else 0) }
+            addView(tv(14f, true).apply { text = "إغلاق"; gravity = Gravity.CENTER })
+        }
+        sheet.addView(closeBtn, LinearLayout.LayoutParams(dp(340), -2))
+
+        dialog.setContentView(sheet)
+        dialog.show()
+    }
+
     private fun openInternalSettingsDialog() {
         val dialog = Dialog(this)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
@@ -463,45 +601,35 @@ class MainActivity : Activity() {
         val sheet = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
-            background = GradientDrawable(
-                GradientDrawable.Orientation.TL_BR,
-                intArrayOf(0xEE141E30.toInt(), 0xEE243B55.toInt())
-            ).apply {
-                cornerRadius = dp(26).toFloat()
-                setStroke(dp(2), Color.argb(110, 255, 255, 255))
-            }
+            background = glass(240, 22, Color.WHITE, 2).apply { setColor(0xEE141E30.toInt()) }
             setPadding(dp(28), dp(22), dp(28), dp(22))
         }
 
         sheet.addView(tv(19f, true, Color.parseColor("#4DEEEA")).apply {
-            text = "إعدادات واجهة Argon الذكية"
+            text = "إعدادات واجهة Argon الشاملة"
             setPadding(0, 0, 0, dp(14))
         })
 
-        val currentThemeIdx = prefs.getInt("theme_idx", 0).coerceIn(0, themes.size - 1)
         val items = listOf(
-            "🎨 تغيير خلفية وثيم الواجهة (${themes[currentThemeIdx].first})" to {
-                val nextIdx = (currentThemeIdx + 1) % themes.size
-                prefs.edit().putInt("theme_idx", nextIdx).apply()
-                applySelectedTheme()
+            "🖼️ تثبيت خلفية السيارة الفخمة كافتراضي" to {
+                prefs.edit().putString("custom_bg_url", defaultCustomBgUrl).apply()
+                applyCustomBackground()
                 dialog.dismiss()
-                openInternalSettingsDialog()
             },
-            "📶 إعدادات شبكة الواي فاي (Wi-Fi)" to {
+            "🌐 إدخال رابط خلفية صورة مخصصة (Custom URL)" to {
+                dialog.dismiss()
+                showCustomBgUrlInputDialog()
+            },
+            "📶 إعدادات الواي فاي والشبكة" to {
                 dialog.dismiss()
                 startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
             },
-            "📱 عرض شبكة جميع التطبيقات" to {
-                dialog.dismiss()
-                mainScroll.smoothScrollTo(0, dp(520))
-                allGrid.getChildAt(0)?.requestFocus()
-            },
-            "⭐ إعادة ضبط ترتيب المفضلة الافتراضي" to {
+            "⭐ إعادة تعيين شريط المفضلة" to {
                 prefs.edit().remove("fav_apps").apply()
                 loadAppsAndDock()
                 dialog.dismiss()
             },
-            "⚙️ فتح إعدادات نظام البروجكتر الأساسية" to {
+            "⚙️ إعدادات نظام البروجكتر الأساسية" to {
                 dialog.dismiss()
                 startActivity(Intent(Settings.ACTION_SETTINGS))
             }
@@ -511,36 +639,56 @@ class MainActivity : Activity() {
             val rowBtn = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                background = glass(35, 16, Color.argb(50, 255, 255, 255), 1)
+                background = glass(40, 16, Color.argb(60, 255, 255, 255), 1)
                 setPadding(dp(18), dp(12), dp(18), dp(12))
                 isFocusable = true
                 isClickable = true
                 setOnClickListener { action() }
                 setOnFocusChangeListener { v, f ->
-                    v.background = glass(if (f) 110 else 35, 16, if (f) Color.WHITE else Color.argb(50, 255, 255, 255), if (f) 2 else 1)
+                    v.background = glass(if (f) 120 else 40, 16, if (f) Color.WHITE else Color.argb(60, 255, 255, 255), if (f) 2 else 1)
                     v.animate().scaleX(if (f) 1.04f else 1f).scaleY(if (f) 1.04f else 1f).setDuration(110).start()
                 }
-                addView(tv(14.5f, true).apply { text = label })
+                addView(tv(14f, true).apply { text = label })
             }
-            sheet.addView(rowBtn, LinearLayout.LayoutParams(dp(420), -2).apply { bottomMargin = dp(10) })
+            sheet.addView(rowBtn, LinearLayout.LayoutParams(dp(400), -2).apply { bottomMargin = dp(10) })
         }
 
         dialog.setContentView(sheet)
         dialog.show()
     }
 
+    private fun showCustomBgUrlInputDialog() {
+        val input = EditText(this).apply {
+            hint = "أدخل رابط صورة مباشر (HTTPS)"
+            setText(prefs.getString("custom_bg_url", defaultCustomBgUrl))
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.GRAY)
+            setPadding(dp(14), dp(14), dp(14), dp(14))
+        }
+        AlertDialog.Builder(this)
+            .setTitle("تغيير خلفية الواجهة")
+            .setView(input)
+            .setPositiveButton("تطبيق") { _, _ ->
+                val url = input.text.toString().trim()
+                if (url.isNotEmpty()) {
+                    prefs.edit().putString("custom_bg_url", url).apply()
+                    applyCustomBackground()
+                }
+            }
+            .setNegativeButton("إلغاء", null)
+            .show()
+    }
+
     // ==========================================
-    // مباريات اليوم بشعارات الأندية الحقيقية والمقاس الموحد
+    // مباريات اليوم بشعارات الأندية الآسيوية والأوروبية الحقيقية
     // ==========================================
     data class ClubMatch(
         val league: String,
         val round: String,
         val homeName: String,
         val homeLogoUrl: String,
-        val homeFallbackColor: Int,
         val awayName: String,
         val awayLogoUrl: String,
-        val awayFallbackColor: Int,
         val matchTime: String
     )
 
@@ -549,33 +697,33 @@ class MainActivity : Activity() {
 
         val matches = listOf(
             ClubMatch(
-                "دوري أبطال آسيا للنخبة", "الجولة 3",
-                "الاتحاد", "https://a.espncdn.com/i/teamlogos/soccer/500/10315.png", 0xFFE6A100.toInt(),
-                "نيفتشي", "https://a.espncdn.com/i/teamlogos/soccer/500/21600.png", 0xFF1B5E20.toInt(),
-                "4:45 م"
-            ),
-            ClubMatch(
-                "دوري أبطال آسيا للنخبة", "الجولة 3",
-                "الأهلي", "https://a.espncdn.com/i/teamlogos/soccer/500/10313.png", 0xFF0D6838.toInt(),
-                "الغرافة", "https://a.espncdn.com/i/teamlogos/soccer/500/8677.png", 0xFFFBC02D.toInt(),
+                "أبطال آسيا للنخبة", "الجولة 3",
+                "الهلال", "https://a.espncdn.com/i/teamlogos/soccer/500/10314.png",
+                "العين", "https://a.espncdn.com/i/teamlogos/soccer/500/8663.png",
                 "7:00 م"
             ),
             ClubMatch(
-                "دوري أبطال آسيا للنخبة", "الجولة 3",
-                "تراكتور", "https://a.espncdn.com/i/teamlogos/soccer/500/13713.png", 0xFFC62828.toInt(),
-                "العين", "https://a.espncdn.com/i/teamlogos/soccer/500/8663.png", 0xFF6A1B9A.toInt(),
+                "أبطال آسيا للنخبة", "الجولة 3",
+                "الاتحاد", "https://a.espncdn.com/i/teamlogos/soccer/500/10315.png",
+                "باختاكور", "https://a.espncdn.com/i/teamlogos/soccer/500/21597.png",
+                "4:45 م"
+            ),
+            ClubMatch(
+                "أبطال آسيا للنخبة", "الجولة 3",
+                "الأهلي", "https://a.espncdn.com/i/teamlogos/soccer/500/10313.png",
+                "الغرافة", "https://a.espncdn.com/i/teamlogos/soccer/500/8677.png",
                 "7:00 م"
             ),
             ClubMatch(
                 "الدوري الفرنسي", "الجولة 9",
-                "ليون", "https://a.espncdn.com/i/teamlogos/soccer/500/167.png", 0xFF1565C0.toInt(),
-                "باريس سان جيرمان", "https://a.espncdn.com/i/teamlogos/soccer/500/160.png", 0xFF0D1B2A.toInt(),
+                "ليون", "https://a.espncdn.com/i/teamlogos/soccer/500/167.png",
+                "باريس سان جيرمان", "https://a.espncdn.com/i/teamlogos/soccer/500/160.png",
                 "10:30 م"
             ),
             ClubMatch(
                 "الدوري الإسباني", "الجولة 10",
-                "أوساسونا", "https://a.espncdn.com/i/teamlogos/soccer/500/97.png", 0xFFB71C1C.toInt(),
-                "إشبيلية", "https://a.espncdn.com/i/teamlogos/soccer/500/243.png", 0xFFD32F2F.toInt(),
+                "إشبيلية", "https://a.espncdn.com/i/teamlogos/soccer/500/243.png",
+                "أوساسونا", "https://a.espncdn.com/i/teamlogos/soccer/500/97.png",
                 "11:00 م"
             )
         )
@@ -587,35 +735,33 @@ class MainActivity : Activity() {
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_HORIZONTAL
-                background = glass(34, 18, Color.argb(65, 255, 255, 255), 1)
+                background = glass(38, 18, Color.argb(70, 255, 255, 255), 1)
                 setPadding(dp(12), dp(8), dp(12), dp(8))
                 isFocusable = true
                 isClickable = true
 
                 setOnFocusChangeListener { v, focused ->
-                    v.background = glass(if (focused) 95 else 34, 18, if (focused) Color.WHITE else Color.argb(65, 255, 255, 255), if (focused) 2 else 1)
+                    v.background = glass(if (focused) 110 else 38, 18, if (focused) Color.WHITE else Color.argb(70, 255, 255, 255), if (focused) 2 else 1)
                     v.animate().scaleX(if (focused) 1.07f else 1f).scaleY(if (focused) 1.07f else 1f).setDuration(120).start()
                 }
 
-                // رأس البطاقة (اسم البطولة والجولة)
                 val header = LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
                     addView(tv(10.5f, true, Color.parseColor("#4DEEEA")).apply { text = m.league; maxLines = 1 })
                     addView(View(context), LinearLayout.LayoutParams(0, 0, 1f))
-                    addView(tv(10f, false, Color.argb(175, 255, 255, 255)).apply { text = m.round })
+                    addView(tv(10f, false, Color.argb(190, 255, 255, 255)).apply { text = m.round })
                 }
                 addView(header, LinearLayout.LayoutParams(-1, -2))
 
-                // الوسط: شعار النادي الأول + الاسم vs شعار النادي الثاني + الاسم
                 val teamsRow = LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
                     setPadding(0, dp(6), 0, dp(4))
                 }
 
-                val homeCol = createClubColumn(m.homeName, m.homeLogoUrl, m.homeFallbackColor)
-                val awayCol = createClubColumn(m.awayName, m.awayLogoUrl, m.awayFallbackColor)
+                val homeCol = createClubColumn(m.homeName, m.homeLogoUrl)
+                val awayCol = createClubColumn(m.awayName, m.awayLogoUrl)
 
                 teamsRow.addView(homeCol, LinearLayout.LayoutParams(0, -2, 1f))
                 teamsRow.addView(tv(11f, true, Color.argb(160, 255, 255, 255)).apply {
@@ -627,7 +773,6 @@ class MainActivity : Activity() {
 
                 addView(teamsRow, LinearLayout.LayoutParams(-1, 0, 1f))
 
-                // التوقيت بالأسفل
                 addView(tv(11.5f, true, Color.WHITE).apply {
                     text = m.matchTime
                     gravity = Gravity.CENTER
@@ -640,14 +785,14 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun createClubColumn(name: String, logoUrl: String, fallbackColor: Int): LinearLayout {
+    private fun createClubColumn(name: String, logoUrl: String): LinearLayout {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
 
             val logoImg = ImageView(context).apply {
                 scaleType = ImageView.ScaleType.FIT_CENTER
-                setImageDrawable(createFallbackCrestDrawable(name, fallbackColor))
+                setImageDrawable(createGenericShield(name))
             }
             loadClubCrestAsync(logoUrl, logoImg)
 
@@ -661,17 +806,18 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun createFallbackCrestDrawable(teamName: String, color: Int): Drawable {
+    private fun createGenericShield(name: String): Drawable {
         val size = dp(32)
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
-        val p = Paint(Paint.ANTI_ALIAS_FLAG)
-        p.color = color
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#28354A")
+        }
         canvas.drawCircle(size / 2f, size / 2f, size / 2f - 2, p)
-        p.style = Paint.Style.STROKE
         p.color = Color.WHITE
-        p.strokeWidth = 2f
-        canvas.drawCircle(size / 2f, size / 2f, size / 2f - 2, p)
+        p.textSize = 10f
+        p.textAlign = Paint.Align.CENTER
+        canvas.drawText(name.take(1), size / 2f, size / 2f + 4, p)
         return BitmapDrawable(resources, bmp)
     }
 
@@ -697,7 +843,7 @@ class MainActivity : Activity() {
     }
 
     // ==========================================
-    // بطاقات التطبيقات بنمط Apple TV 4K (ملونة وممتلئة بالكامل)
+    // بطاقات التطبيقات بنمط Apple TV 4K الممتلئة والناعمة
     // ==========================================
     private fun loadAppsAndDock() {
         val pm = packageManager
@@ -718,12 +864,12 @@ class MainActivity : Activity() {
         }
 
         for (i in favList.indices) {
-            favRow.addView(createAppleTvTile(favList[i], isFav = true, favIndex = i, totalFavs = favList.size))
+            favRow.addView(createAppleTvTile(favList[i], isFav = true, favIndex = i))
         }
 
         allGrid.removeAllViews()
         for (app in allApps) {
-            val tile = createAppleTvTile(app, isFav = false, favIndex = -1, totalFavs = 0)
+            val tile = createAppleTvTile(app, isFav = false, favIndex = -1)
             val p = GridLayout.LayoutParams().apply {
                 width = dp(182)
                 height = dp(90)
@@ -747,8 +893,6 @@ class MainActivity : Activity() {
             key.contains("aroma") -> Color.parseColor("#B71C1C") to Color.WHITE
             key.contains("viu") -> Color.parseColor("#FBC02D") to Color.parseColor("#212121")
             key.contains("vlc") -> Color.parseColor("#FB8C00") to Color.WHITE
-            key.contains("play") || key.contains("vending") -> Color.WHITE to Color.parseColor("#37474F")
-            key.contains("newpipe") -> Color.parseColor("#D32F2F") to Color.WHITE
             else -> extractDominantColor(icon) to Color.WHITE
         }
     }
@@ -771,7 +915,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun createAppleTvTile(app: ResolveInfo, isFav: Boolean, favIndex: Int, totalFavs: Int): View {
+    private fun createAppleTvTile(app: ResolveInfo, isFav: Boolean, favIndex: Int): View {
         val pm = packageManager
         val pkg = app.activityInfo.packageName
         val label = app.loadLabel(pm).toString()
@@ -781,7 +925,7 @@ class MainActivity : Activity() {
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            background = solidCard(bgColor, 18, Color.argb(40, 255, 255, 255), 1)
+            background = solidCard(bgColor, 18, Color.argb(50, 255, 255, 255), 1)
             setPadding(dp(14), dp(10), dp(14), dp(10))
             isFocusable = true
             isClickable = true
@@ -824,31 +968,22 @@ class MainActivity : Activity() {
                 v.background = solidCard(
                     bgColor,
                     18,
-                    if (focused) Color.WHITE else Color.argb(40, 255, 255, 255),
+                    if (focused) Color.WHITE else Color.argb(50, 255, 255, 255),
                     if (focused) 3 else 1
                 )
                 v.elevation = if (focused) 28f else 4f
             }
 
-            // prüfen ما إذا كان التطبيق يملك بانر ترويجي كامل لملء الكرت
-            val banner = try { app.activityInfo.loadBanner(pm) } catch (e: Throwable) { null }
-            if (banner != null) {
-                addView(ImageView(context).apply {
-                    setImageDrawable(banner)
-                    scaleType = ImageView.ScaleType.FIT_CENTER
-                }, LinearLayout.LayoutParams(-1, -1))
-            } else {
-                addView(ImageView(context).apply {
-                    setImageDrawable(icon)
-                    scaleType = ImageView.ScaleType.FIT_CENTER
-                }, LinearLayout.LayoutParams(dp(42), dp(42)))
+            addView(ImageView(context).apply {
+                setImageDrawable(icon)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+            }, LinearLayout.LayoutParams(dp(42), dp(42)))
 
-                addView(tv(14f, true, textColor).apply {
-                    text = label
-                    maxLines = 1
-                    setPadding(dp(10), 0, 0, 0)
-                }, LinearLayout.LayoutParams(-2, -2))
-            }
+            addView(tv(14f, true, textColor).apply {
+                text = label
+                maxLines = 1
+                setPadding(dp(10), 0, 0, 0)
+            }, LinearLayout.LayoutParams(-2, -2))
         }
     }
 
@@ -900,7 +1035,7 @@ class MainActivity : Activity() {
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
-            background = glass(230, 22, Color.WHITE, 2).apply { setColor(0xEE162234.toInt()) }
+            background = glass(240, 22, Color.WHITE, 2).apply { setColor(0xEE162234.toInt()) }
             setPadding(dp(24), dp(18), dp(24), dp(18))
             addView(tv(17f, true, Color.parseColor("#4DEEEA")).apply {
                 text = label
@@ -916,19 +1051,23 @@ class MainActivity : Activity() {
                 isClickable = true
                 setOnClickListener { dialog.dismiss(); act() }
                 setOnFocusChangeListener { v, f ->
-                    v.background = glass(if (f) 110 else 40, 14, if (f) Color.WHITE else Color.TRANSPARENT, if (f) 2 else 0)
+                    v.background = glass(if (f) 120 else 40, 14, if (f) Color.WHITE else Color.TRANSPARENT, if (f) 2 else 0)
                 }
                 addView(tv(14f, true).apply { text = title })
             }
-            box.addView(b, LinearLayout.LayoutParams(dp(320), -2).apply { bottomMargin = dp(8) })
+            box.addWidget(b, LinearLayout.LayoutParams(dp(320), -2).apply { bottomMargin = dp(8) })
         }
 
         dialog.setContentView(box)
         dialog.show()
     }
 
+    private fun ViewGroup.addWidget(child: View, params: ViewGroup.LayoutParams) {
+        addView(child, params)
+    }
+
     // ==========================================
-    // محركات الوقت والطقس ومواقيت الصلاة (الرياض)
+    // محركات الوقت والطقس ومواقيت الصلاة
     // ==========================================
     private fun startEngines() {
         renderMatchesWithRealCrests()
@@ -951,7 +1090,7 @@ class MainActivity : Activity() {
 
     private fun refreshRiyadhLiveFeeds() {
         thread {
-            // الطقس الحي لمدينة الرياض
+            // طقس الرياض
             try {
                 val w = JSONObject(URL("https://api.open-meteo.com/v1/forecast?latitude=24.7136&longitude=46.6753&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code").readText()).getJSONObject("current")
                 val t = Math.round(w.getDouble("temperature_2m"))
@@ -972,7 +1111,7 @@ class MainActivity : Activity() {
                 }
             } catch (e: Throwable) { }
 
-            // مواقيت الصلاة لمدينة الرياض (تقويم أم القرى)
+            // مواقيت الصلاة (الرياض - أم القرى)
             try {
                 val t = JSONObject(URL("https://api.aladhan.com/v1/timingsByCity?city=Riyadh&country=SA&method=4").readText()).getJSONObject("data").getJSONObject("timings")
                 val list = listOf(
@@ -995,13 +1134,13 @@ class MainActivity : Activity() {
                             orientation = LinearLayout.HORIZONTAL
                             gravity = Gravity.CENTER_VERTICAL
                             setPadding(dp(6), dp(1), dp(6), dp(1))
-                            if (isNext) background = glass(55, 8)
+                            if (isNext) background = glass(60, 8)
 
-                            addView(tv(11.5f, isNext, if (isNext) Color.parseColor("#4DEEEA") else Color.argb(195, 255, 255, 255)).apply {
+                            addView(tv(11.5f, isNext, if (isNext) Color.parseColor("#4DEEEA") else Color.argb(200, 255, 255, 255)).apply {
                                 text = p.first
                             }, LinearLayout.LayoutParams(0, -2, 1f))
 
-                            addView(tv(11.5f, isNext, if (isNext) Color.WHITE else Color.argb(215, 255, 255, 255)).apply {
+                            addView(tv(11.5f, isNext, if (isNext) Color.WHITE else Color.argb(220, 255, 255, 255)).apply {
                                 text = LocalTime.parse(p.second).format(DateTimeFormatter.ofPattern("h:mm a", ar))
                             })
                         }
