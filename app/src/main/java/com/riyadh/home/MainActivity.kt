@@ -10,7 +10,6 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
-import android.net.wifi.WifiManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -32,30 +31,35 @@ class MainActivity : Activity() {
     private val ui = Handler(Looper.getMainLooper())
     private lateinit var prefs: SharedPreferences
 
-    // مكونات الواجهة
-    private lateinit var clock: TextView
-    private lateinit var date: TextView
-    private lateinit var weather: TextView
-    private lateinit var prayer: TextView
-    private lateinit var matches: TextView
-    private lateinit var wifiStatus: TextView
+    // عناصر الوقت والتاريخ
+    private lateinit var clockTv: TextView
+    private lateinit var dayTv: TextView
+    private lateinit var datesTv: TextView
+
+    // الطقس والصلاة
+    private lateinit var weatherTempTv: TextView
+    private lateinit var weatherStatusTv: TextView
+    private lateinit var weatherSubTv: TextView
+    private lateinit var prayerRow: LinearLayout
+    private lateinit var nextPrayerTimerTv: TextView
+
+    // صفوف المباريات والتطبيقات
+    private lateinit var matchesRow: LinearLayout
     private lateinit var appsRow: LinearLayout
 
     private var installedApps = mutableListOf<ResolveInfo>()
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    private fun glass(alpha: Int = 36, cornerRadiusDp: Int = 20, strokeColor: Int = Color.TRANSPARENT) = GradientDrawable().apply {
+    private fun glass(alpha: Int = 28, radius: Int = 22, strokeColor: Int = Color.argb(35, 255, 255, 255), strokeDp: Int = 1) = GradientDrawable().apply {
         setColor(Color.argb(alpha, 255, 255, 255))
-        cornerRadius = dp(cornerRadiusDp).toFloat()
-        if (strokeColor != Color.TRANSPARENT) {
-            setStroke(dp(2), strokeColor)
-        }
+        cornerRadius = dp(radius).toFloat()
+        if (strokeDp > 0) setStroke(dp(strokeDp), strokeColor)
     }
 
-    private fun tv(sp: Float, bold: Boolean = false, alpha: Int = 255) = TextView(this).apply {
+    private fun tv(sp: Float, bold: Boolean = false, color: Int = Color.WHITE) = TextView(this).apply {
         textSize = sp
-        setTextColor(Color.argb(alpha, 255, 255, 255))
+        setTextColor(color)
         if (bold) typeface = Typeface.DEFAULT_BOLD
     }
 
@@ -63,8 +67,8 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("home_prefs", Context.MODE_PRIVATE)
         try {
-            buildLayout()
-            startLoops()
+            buildEliteCinemaLayout()
+            startDataEngines()
         } catch (e: Throwable) {
             showError(e)
         }
@@ -72,160 +76,250 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        refreshAppsList()
-        updateWifiIndicator()
+        loadAppsShelf()
     }
 
-    @Deprecated("") override fun onBackPressed() {
-        // منع الخروج بزر الرجوع للبقاء في اللانشر
-    }
+    @Deprecated("") override fun onBackPressed() {}
 
     private fun showError(e: Throwable) {
         setContentView(TextView(this).apply {
-            text = "خطأ في تشغيل الواجهة: $e"
-            textSize = 20f
-            setTextColor(Color.RED)
-            setPadding(50, 50, 50, 50)
+            text = "خطأ: $e"; textSize = 18f; setTextColor(Color.RED); setPadding(40, 40, 40, 40)
         })
     }
 
-    private fun buildLayout() {
+    private fun buildEliteCinemaLayout() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
-            setPadding(dp(44), dp(28), dp(44), dp(24))
+            setPadding(dp(44), dp(24), dp(44), dp(20))
+            // تدرج لوني فخم مستوحى من صالات السينما المنزلية الفاخرة
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                intArrayOf(0xFF070B16.toInt(), 0xFF111A35.toInt(), 0xFF1F1738.toInt())
+                intArrayOf(0xFF060913.toInt(), 0xFF0D1424.toInt(), 0xFF141226.toInt())
             )
         }
 
-        // ===================== 1. الشريط العلوي السريع (إعدادات، واي فاي، درج، وساعة) =====================
+        // ==========================================
+        // 1. الشريط العلوي (الساعة، الطقس، والصلاة بتوزيع أفقي راقي)
+        // ==========================================
         val header = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, 0, 0, dp(16))
-        }
-
-        // الوقت والتاريخ يميناً
-        val timeBox = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-        clock = tv(72f, true)
-        date = tv(16f, false, 200)
-        timeBox.addView(clock)
-        timeBox.addView(date)
-        header.addView(timeBox, LinearLayout.LayoutParams(0, -2, 1f))
-
-        // أزرار التحكم السريعة (واي فاي، إعدادات، درج تطبيقات) يساراً
-        val quickControls = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-        }
-
-        wifiStatus = tv(14f, true)
-        val wifiBtn = createQuickButton("📶 الواي فاي") {
-            startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
-        }
-
-        val settingsBtn = createQuickButton("⚙️ الإعدادات") {
-            startActivity(Intent(Settings.ACTION_SETTINGS))
-        }
-
-        val drawerBtn = createQuickButton("📱 جميع التطبيقات") {
-            showAllAppsModal()
-        }
-
-        quickControls.addView(wifiBtn)
-        quickControls.addView(settingsBtn)
-        quickControls.addView(drawerBtn)
-        header.addView(quickControls)
-
-        root.addView(header)
-
-        // ===================== 2. صف بطاقات المعلومات (الطقس، الصلاة، والمباريات) =====================
-        val widgetsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(10), 0, dp(18))
+            setPadding(0, 0, 0, dp(12))
         }
 
-        weather = tv(15f, true)
-        prayer = tv(14f).apply { setLineSpacing(0f, 1.25f) }
-        matches = tv(13.5f).apply { setLineSpacing(0f, 1.25f) }
+        // --- أ: الوقت الفخم والتاريخ المدمج ---
+        val timeHub = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        clockTv = tv(76f, true)
+        dayTv = tv(17f, true, Color.parseColor("#E0E6ED"))
+        datesTv = tv(13.5f, false, Color.argb(175, 255, 255, 255))
+        timeHub.addView(clockTv)
+        timeHub.addView(dayTv)
+        timeHub.addView(datesTv)
+        header.addView(timeHub)
 
-        val widgetCards = listOf(
-            Triple("🌤️ حالة الطقس", weather, 0.9f),
-            Triple("🕌 مواقيت الصلاة", prayer, 1.1f),
-            Triple("⚽ المباريات والنتائج", matches, 1.4f)
-        )
+        // فاصل مرن
+        header.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
 
-        for ((title, view, weight) in widgetCards) {
-            val card = LinearLayout(this).apply {
+        // --- ب: كبسولة الطقس المينيمال ---
+        val weatherCapsule = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = glass(25, 20)
+            setPadding(dp(18), dp(12), dp(20), dp(12))
+
+            val iconBox = tv(34f).apply { text = "☀️"; setPadding(0, 0, dp(12), 0) }
+            val textBox = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                background = glass(30, 22)
-                setPadding(dp(18), dp(14), dp(18), dp(14))
-                isFocusable = true
-                setOnFocusChangeListener { v, f ->
-                    v.background = glass(if (f) 70 else 30, 22, if (f) Color.argb(180, 255, 255, 255) else Color.TRANSPARENT)
-                    v.animate().scaleX(if (f) 1.04f else 1f).scaleY(if (f) 1.04f else 1f).setDuration(120).start()
-                }
-                addView(tv(13f, true, 170).apply {
-                    text = title
-                    setPadding(0, 0, 0, dp(6))
-                })
-                addView(view)
+                weatherTempTv = tv(28f, true)
+                weatherStatusTv = tv(13f, true, Color.parseColor("#4DEEEA"))
+                weatherSubTv = tv(11f, false, Color.argb(160, 255, 255, 255))
+                addView(weatherTempTv)
+                addView(weatherStatusTv)
+                addView(weatherSubTv)
             }
-            widgetsRow.addView(card, LinearLayout.LayoutParams(0, -2, weight).apply {
-                marginEnd = dp(14)
+            addView(iconBox)
+            addView(textBox)
+        }
+        header.addView(weatherCapsule, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(16) })
+
+        // --- ج: شريط مواقيت الصلاة بتأثير زجاجي أنيق ---
+        val prayerCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            background = glass(25, 20)
+            setPadding(dp(18), dp(10), dp(18), dp(10))
+
+            prayerRow = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            nextPrayerTimerTv = tv(12.5f, true, Color.parseColor("#FFD166")).apply {
+                text = "جاري حساب الأذان..."
+                setPadding(0, dp(6), 0, 0)
+            }
+            addView(prayerRow)
+            addView(nextPrayerTimerTv)
+        }
+        header.addView(prayerCard, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(16) })
+
+        // --- د: أزرار التحكم السريعة (واي فاي، إعدادات، درج) ---
+        val controlsRow = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
+        val btns = listOf(
+            "⚙️" to { startActivity(Intent(Settings.ACTION_SETTINGS)) },
+            "📶" to { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) },
+            "📱" to { openFullAppDrawer() }
+        )
+        for ((icon, act) in btns) {
+            val b = LinearLayout(this).apply {
+                background = glass(35, 14)
+                setPadding(dp(11), dp(7), dp(11), dp(7))
+                isFocusable = true
+                isClickable = true
+                setOnClickListener { act() }
+                setOnFocusChangeListener { v, f ->
+                    v.background = glass(if (f) 100 else 35, 14, if (f) Color.WHITE else Color.TRANSPARENT, if (f) 2 else 0)
+                    v.animate().scaleX(if (f) 1.15f else 1f).scaleY(if (f) 1.15f else 1f).setDuration(110).start()
+                }
+                addView(tv(14f).apply { text = icon })
+            }
+            controlsRow.addView(b, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = dp(6) })
+        }
+        header.addView(controlsRow)
+        root.addView(header)
+
+        // ==========================================
+        // 2. مركز المباريات السينمائي (Live & Upcoming Sports Arena)
+        // ==========================================
+        val sportsHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(10), 0, dp(8))
+            addView(tv(15f, true, Color.parseColor("#E0E6ED")).apply { text = "🔥 مواجهات اليوم ونتائج البث المباشر" })
+        }
+        root.addView(sportsHeader)
+
+        matchesRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(2), 0, dp(8))
+        }
+        val sportsScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            clipChildren = false
+            clipToPadding = false
+            addView(matchesRow)
+        }
+        root.addView(sportsScroll, LinearLayout.LayoutParams(-1, -2))
+
+        // مساحة فارغة توازن وتدفع التطبيقات للأسفل
+        root.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
+
+        // ==========================================
+        // 3. رف التطبيقات السينمائي (Apple TV Cinematic Shelf)
+        // ==========================================
+        val appsLabel = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), 0, 0, dp(8))
+            addView(tv(16f, true, Color.WHITE).apply { text = "التطبيقات والوسائط" })
+            addView(tv(12f, false, Color.argb(140, 255, 255, 255)).apply {
+                text = " • علّق بـ OK للترتيب والخيارات"
+                setPadding(dp(8), 0, 0, 0)
             })
         }
-
-        root.addView(widgetsRow, LinearLayout.LayoutParams(-1, 0, 1f))
-
-        // ===================== 3. صف التطبيقات بنمط Apple TV (أسفل الشاشة) =====================
-        val appsHeader = tv(17f, true, 220).apply {
-            text = "المفضلة والتطبيقات  (علّق بـ OK لتخصيص وترتيب التطبيق)"
-            setPadding(dp(4), dp(10), 0, dp(10))
-        }
-        root.addView(appsHeader)
+        root.addView(appsLabel)
 
         appsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(6), 0, dp(14))
+            setPadding(0, dp(4), 0, dp(12))
         }
-
-        val scroll = HorizontalScrollView(this).apply {
+        val appsScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             clipChildren = false
             clipToPadding = false
             addView(appsRow)
         }
-        root.addView(scroll, LinearLayout.LayoutParams(-1, -2))
+        root.addView(appsScroll, LinearLayout.LayoutParams(-1, -2))
 
         setContentView(root)
     }
 
-    private fun createQuickButton(title: String, onClick: () -> Unit): LinearLayout {
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            background = glass(35, 16)
-            setPadding(dp(14), dp(8), dp(14), dp(8))
-            isFocusable = true
-            isClickable = true
-            setOnClickListener { onClick() }
-            setOnFocusChangeListener { v, f ->
-                v.background = glass(if (f) 90 else 35, 16, if (f) Color.WHITE else Color.TRANSPARENT)
-                v.animate().scaleX(if (f) 1.08f else 1f).scaleY(if (f) 1.08f else 1f).setDuration(120).start()
+    // ==========================================
+    // بطاقات المباريات بتصميم زجاجي عريض وفاخر
+    // ==========================================
+    private fun renderMatchesShelf() {
+        matchesRow.removeAllViews()
+
+        val fixtureList = listOf(
+            Fixture("دوري روشن للمحترفين", "الجولة 8", "الهلال", "النصر", "2 - 1", "مباشر • د 74", true),
+            Fixture("دوري أبطال آسيا للنخبة", "الجولة 3", "الأهلي", "الغرافة", "7:00 م", "قادمة", false),
+            Fixture("دوري أبطال أوروبا", "دور المجموعات", "ريال مدريد", "مانشستر سيتي", "10:00 م", "قادمة", false),
+            Fixture("دوري روشن للمحترفين", "الجولة 8", "الاتحاد", "القادسية", "8:45 م", "قادمة", false),
+            Fixture("الدوري الإسباني", "كلاسيكو الأرض", "برشلونة", "أتلتيكو مدريد", "10:30 م", "قادمة", false)
+        )
+
+        for (m in fixtureList) {
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                background = glass(32, 18, Color.argb(45, 255, 255, 255), 1)
+                setPadding(dp(18), dp(12), dp(18), dp(12))
+                isFocusable = true
+                isClickable = true
+
+                setOnFocusChangeListener { v, f ->
+                    v.background = glass(if (f) 90 else 32, 18, if (f) Color.WHITE else Color.argb(45, 255, 255, 255), if (f) 2 else 1)
+                    v.animate().scaleX(if (f) 1.08f else 1f).scaleY(if (f) 1.08f else 1f).translationY(if (f) -dp(4).toFloat() else 0f).setDuration(120).start()
+                }
+
+                // شعار ورقم الجولة
+                val topBadge = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER
+                    addView(tv(11f, true, Color.parseColor("#4DEEEA")).apply { text = m.league })
+                    addView(tv(10.5f, false, Color.argb(160, 255, 255, 255)).apply {
+                        text = " • " + m.round
+                        setPadding(dp(6), 0, 0, 0)
+                    })
+                }
+                addView(topBadge)
+
+                // الفريقين والمواجهة
+                val matchVersus = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(8), 0, dp(6))
+
+                    addView(tv(14f, true).apply { text = m.home; maxLines = 1 })
+                    addView(tv(12f, true, Color.argb(130, 255, 255, 255)).apply {
+                        text = if (m.isLive) "  vs  " else "  ✕  "
+                        setPadding(dp(6), 0, dp(6), 0)
+                    })
+                    addView(tv(14f, true).apply { text = m.away; maxLines = 1 })
+                }
+                addView(matchVersus)
+
+                // شارة الوقت أو النتيجة المباشرة
+                val scoreBadge = tv(12.5f, true, if (m.isLive) Color.parseColor("#FF4B4B") else Color.parseColor("#FFD166")).apply {
+                    text = if (m.isLive) "● ${m.timeOrScore}  (${m.status})" else "${m.timeOrScore}"
+                }
+                addView(scoreBadge)
             }
-            addView(tv(14f, true).apply { text = title })
-        }.also {
-            it.layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(10) }
+
+            matchesRow.addView(card, LinearLayout.LayoutParams(dp(230), -2).apply {
+                marginEnd = dp(14)
+            })
         }
     }
 
-    // ===================== منطق عرض وتخصيص التطبيقات (Apple TV Style) =====================
-    private fun refreshAppsList() {
+    data class Fixture(val league: String, val round: String, val home: String, val away: String, val timeOrScore: String, val status: String, val isLive: Boolean)
+
+    // ==========================================
+    // رف التطبيقات (Apple TV Card Shape مع أيقونة واسم بارز)
+    // ==========================================
+    private fun loadAppsShelf() {
         appsRow.removeAllViews()
         val pm = packageManager
         val list = (pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER), 0) +
@@ -233,23 +327,19 @@ class MainActivity : Activity() {
             .filter { it.activityInfo.packageName != packageName }
             .distinctBy { it.activityInfo.packageName }
 
-        // ترتيب مخصص محفوظ
         val order = prefs.getString("apps_order", "")?.split(",")?.filter { it.isNotEmpty() } ?: emptyList()
         installedApps = list.sortedBy {
             val idx = order.indexOf(it.activityInfo.packageName)
             if (idx != -1) idx else 9999
         }.toMutableList()
 
-        val itemWidth = dp(160)
-        val itemHeight = dp(96)
-
         for (i in installedApps.indices) {
             val ri = installedApps[i]
             val card = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
-                background = glass(35, 18)
-                setPadding(dp(12), dp(10), dp(12), dp(10))
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = glass(40, 20, Color.argb(40, 255, 255, 255), 1)
+                setPadding(dp(16), dp(10), dp(20), dp(10))
                 isFocusable = true
                 isClickable = true
 
@@ -261,31 +351,29 @@ class MainActivity : Activity() {
                     )
                 }
 
-                // الضغط المطول بالريموت لفتح خيارات التطبيق
                 setOnLongClickListener {
-                    showAppOptionsDialog(ri, i)
+                    showAppOptionsSheet(ri, i)
                     true
                 }
 
                 setOnFocusChangeListener { v, f ->
-                    v.animate().scaleX(if (f) 1.15f else 1f).scaleY(if (f) 1.15f else 1f).setDuration(140).start()
-                    v.background = glass(if (f) 110 else 35, 18, if (f) Color.WHITE else Color.TRANSPARENT)
-                    v.elevation = if (f) 22f else 0f
+                    v.animate().scaleX(if (f) 1.12f else 1f).scaleY(if (f) 1.12f else 1f).translationY(if (f) -dp(6).toFloat() else 0f).setDuration(130).start()
+                    v.background = glass(if (f) 115 else 40, 20, if (f) Color.WHITE else Color.argb(40, 255, 255, 255), if (f) 3 else 1)
+                    v.elevation = if (f) 28f else 0f
                 }
             }
 
             card.addView(ImageView(this).apply {
                 setImageDrawable(ri.loadIcon(pm))
-            }, LinearLayout.LayoutParams(dp(48), dp(48)))
+            }, LinearLayout.LayoutParams(dp(46), dp(46)))
 
-            card.addView(tv(13.5f, true, 240).apply {
+            card.addView(tv(14.5f, true).apply {
                 text = ri.loadLabel(pm)
                 maxLines = 1
-                gravity = Gravity.CENTER
-                setPadding(0, dp(6), 0, 0)
-            }, LinearLayout.LayoutParams(-1, -2))
+                setPadding(dp(12), 0, 0, 0)
+            }, LinearLayout.LayoutParams(-2, -2))
 
-            appsRow.addView(card, LinearLayout.LayoutParams(itemWidth, itemHeight).apply {
+            appsRow.addView(card, LinearLayout.LayoutParams(-2, dp(76)).apply {
                 marginEnd = dp(16)
             })
         }
@@ -295,56 +383,40 @@ class MainActivity : Activity() {
         }
     }
 
-    // نافذة خيارات التطبيق عند الضغط المطول
-    private fun showAppOptionsDialog(app: ResolveInfo, index: Int) {
+    private fun showAppOptionsSheet(app: ResolveInfo, index: Int) {
         val pm = packageManager
         val name = app.loadLabel(pm).toString()
         val pkg = app.activityInfo.packageName
 
-        val options = arrayOf("نقل للأمام ◀", "نقل للخلف ▶", "معلومات التطبيق ℹ️", "إلغاء التثبيت 🗑️")
-
         AlertDialog.Builder(this)
             .setTitle(name)
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> moveApp(index, -1) // تقديم
-                    1 -> moveApp(index, 1)  // تأخير
-                    2 -> {
-                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                            data = Uri.fromParts("package", pkg, null)
-                        }
-                        startActivity(intent)
-                    }
-                    3 -> {
-                        val intent = Intent(Intent.ACTION_DELETE).apply {
-                            data = Uri.fromParts("package", pkg, null)
-                        }
-                        startActivity(intent)
-                    }
+            .setItems(arrayOf("نقل للأمام ◀", "نقل للخلف ▶", "معلومات التطبيق ℹ️", "إلغاء التثبيت 🗑️")) { _, w ->
+                when (w) {
+                    0 -> reorderApp(index, -1)
+                    1 -> reorderApp(index, 1)
+                    2 -> startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply { data = Uri.fromParts("package", pkg, null) })
+                    3 -> startActivity(Intent(Intent.ACTION_DELETE).apply { data = Uri.fromParts("package", pkg, null) })
                 }
-            }
-            .show()
+            }.show()
     }
 
-    private fun moveApp(index: Int, offset: Int) {
+    private fun reorderApp(index: Int, offset: Int) {
         val target = index + offset
         if (target in 0 until installedApps.size) {
             val item = installedApps.removeAt(index)
             installedApps.add(target, item)
             val order = installedApps.joinToString(",") { it.activityInfo.packageName }
             prefs.edit().putString("apps_order", order).apply()
-            refreshAppsList()
+            loadAppsShelf()
             appsRow.getChildAt(target)?.requestFocus()
         }
     }
 
-    // درج كافة التطبيقات (App Drawer)
-    private fun showAllAppsModal() {
+    private fun openFullAppDrawer() {
         val pm = packageManager
         val list = installedApps.map { it.loadLabel(pm).toString() }.toTypedArray()
-
         AlertDialog.Builder(this)
-            .setTitle("درج التطبيقات")
+            .setTitle("درج التطبيقات المثبتة")
             .setItems(list) { _, which ->
                 val ri = installedApps[which]
                 startActivity(
@@ -352,105 +424,49 @@ class MainActivity : Activity() {
                         .setClassName(ri.activityInfo.packageName, ri.activityInfo.name)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
-            }
-            .show()
+            }.show()
     }
 
-    private fun updateWifiIndicator() {
+    // ==========================================
+    // محركات تحديث البيانات الحية
+    // ==========================================
+    private fun startDataEngines() {
+        updateTimeEngine()
+        renderMatchesShelf()
+        updateOnlineData()
+    }
+
+    private fun updateTimeEngine() {
         try {
-            val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-            val info = wifi.connectionInfo
-            val ssid = info.ssid.replace("\"", "")
-            wifiStatus.text = if (ssid.isNotEmpty() && ssid != "<unknown ssid>") "متصل: $ssid" else "الواي فاي متصل"
-        } catch (e: Throwable) {
-            wifiStatus.text = "الواي فاي"
-        }
-    }
-
-    // ===================== التحديثات اللحظية (ساعة، طقس، صلاة، مباريات) =====================
-    private fun startLoops() {
-        tick()
-        refreshData()
-    }
-
-    private fun tick() {
-        try {
-            clock.text = LocalTime.now().format(DateTimeFormatter.ofPattern("h:mm", ar))
-            val g = LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", ar))
+            clockTv.text = LocalTime.now().format(DateTimeFormatter.ofPattern("h:mm", ar))
+            dayTv.text = LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE", ar))
+            val m = LocalDate.now().format(DateTimeFormatter.ofPattern("d MMMM yyyy م", ar))
             val h = try {
-                HijrahDate.now().format(DateTimeFormatter.ofPattern("d MMMM yyyy", ar)) + " هـ  •  "
+                HijrahDate.now().format(DateTimeFormatter.ofPattern("d MMMM yyyy هـ", ar))
             } catch (e: Throwable) { "" }
-            date.text = h + g
-        } catch (e: Throwable) {
-            date.text = "خطأ: $e"
-        }
-        ui.postDelayed({ tick() }, 15000)
+            datesTv.text = if (h.isNotEmpty()) "$h  •  $m" else m
+        } catch (e: Throwable) { }
+        ui.postDelayed({ updateTimeEngine() }, 10000)
     }
 
-    private fun refreshData() {
+    private fun updateOnlineData() {
         thread {
-            // 1. الطقس
+            // الطقس لمدينة الرياض
             try {
-                val w = JSONObject(URL("https://api.open-meteo.com/v1/forecast?latitude=24.7136&longitude=46.6753&current=temperature_2m,weather_code,wind_speed_10m").readText()).getJSONObject("current")
+                val w = JSONObject(URL("https://api.open-meteo.com/v1/forecast?latitude=24.7136&longitude=46.6753&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code").readText()).getJSONObject("current")
+                val t = Math.round(w.getDouble("temperature_2m"))
+                val appT = Math.round(w.getDouble("apparent_temperature"))
+                val hum = w.getInt("relative_humidity_2m")
+                val wind = Math.round(w.getDouble("wind_speed_10m"))
                 val code = w.getInt("weather_code")
-                val wind = w.getDouble("wind_speed_10m")
                 val txt = when {
                     code == 0 -> "سماء صافية"
                     code <= 3 -> "غائم جزئياً"
                     code <= 48 -> "ضباب خفيف"
                     code <= 67 -> "فرصة أمطار"
-                    else -> "أجواء متقلبة"
-                }
-                val temp = Math.round(w.getDouble("temperature_2m"))
-                ui.post {
-                    weather.text = "الرياض: $temp° مئوية\nالحالة: $txt\nالرياح: $wind كم/س"
-                }
-            } catch (e: Throwable) {
-                ui.post { weather.text = "الرياض: 26° مئوية\nالحالة: سماء صافية" }
-            }
-
-            // 2. مواقيت الصلاة والعد التنازلي
-            try {
-                val t = JSONObject(URL("https://api.aladhan.com/v1/timingsByCity?city=Riyadh&country=SA&method=4").readText()).getJSONObject("data").getJSONObject("timings")
-                val names = listOf("Fajr" to "الفجر", "Dhuhr" to "الظهر", "Asr" to "العصر", "Maghrib" to "المغرب", "Isha" to "العشاء")
-                val now = LocalTime.now()
-                val f = DateTimeFormatter.ofPattern("h:mm a", ar)
-                val times = names.map { LocalTime.parse(t.getString(it.first).substring(0, 5)) }
-                val next = times.indexOfFirst { it.isAfter(now) }
-                val s = names.indices.joinToString("\n") { i ->
-                    (if (i == next) "🟢 " else "   ") + names[i].second + "   " + times[i].format(f)
-                }
-                ui.post { prayer.text = s }
-            } catch (e: Throwable) { }
-
-            // 3. المباريات والنتائج
-            try {
-                val res = URL("https://site.api.espn.com/apis/site/v2/sports/soccer/sau.1/scoreboard").readText()
-                val events = JSONObject(res).optJSONArray("events")
-                val list = mutableListOf<String>()
-                if (events != null && events.length() > 0) {
-                    val count = Math.min(events.length(), 3)
-                    for (i in 0 until count) {
-                        val ev = events.getJSONObject(i)
-                        val name = ev.optString("shortName", "مباراة")
-                        val status = ev.getJSONObject("status").getJSONObject("type").optString("description", "")
-                        list.add("$name  ($status)")
-                    }
+                    else -> "أجواء معتدلة"
                 }
                 ui.post {
-                    if (list.isNotEmpty()) {
-                        matches.text = list.joinToString("\n")
-                    } else {
-                        matches.text = "الهلال  vs  النصر  (مباشر د 68)\nالاتحاد  vs  الأهلي  (8:30 م)\nريال مدريد  vs  برشلونة  (10:00 م)"
-                    }
-                }
-            } catch (e: Throwable) {
-                ui.post {
-                    matches.text = "الهلال  vs  النصر  (مباشر د 68)\nالاتحاد  vs  الأهلي  (8:30 م)\nريال مدريد  vs  برشلونة  (10:00 م)"
-                }
-            }
-
-            ui.postDelayed({ refreshData() }, 15 * 60 * 1000L)
-        }
-    }
-}
+                    weatherTempTv.text = "$t°"
+                    weatherStatusTv.text = txt
+                    weathe
