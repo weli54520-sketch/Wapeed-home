@@ -61,12 +61,13 @@ class MainActivity : Activity() {
     private val logoCache = ConcurrentHashMap<String, Bitmap>()
     private val bgCache = ConcurrentHashMap<String, Bitmap>()
 
-    private val defaultCustomBgUrl = "https://images.unsplash.com/photo-1552519507-da3b142c6e3d?q=80&w=1920&auto=format&fit=crop"
+    // خلفية فخمة داكنة ومناسبة للواجهة (ويمكنك وضع رابط صورة السيارة والحصان من الإعدادات)
+    private val defaultCustomBgUrl = "https://images.unsplash.com/photo-1503376780353-7e6692767b70?q=80&w=1920&auto=format&fit=crop"
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    private fun glass(alpha: Int = 38, radius: Int = 22, strokeColor: Int = Color.argb(60, 255, 255, 255), strokeDp: Int = 1) = GradientDrawable().apply {
-        setColor(Color.argb(alpha, 255, 255, 255))
+    private fun glass(alpha: Int = 45, radius: Int = 22, strokeColor: Int = Color.argb(75, 255, 255, 255), strokeDp: Int = 1) = GradientDrawable().apply {
+        setColor(Color.argb(alpha, 15, 23, 36))
         cornerRadius = dp(radius).toFloat()
         if (strokeDp > 0) setStroke(dp(strokeDp), strokeColor)
     }
@@ -139,9 +140,10 @@ class MainActivity : Activity() {
         }
         frameLayout.addView(backgroundImageView)
 
+        // طبقة تعتيم متدرجة خفيفة لتبرز البطاقات الزجاجية بوضوح فخم
         val darkOverlay = View(this).apply {
             layoutParams = ViewGroup.LayoutParams(-1, -1)
-            setBackgroundColor(0x600A0F18.toInt())
+            setBackgroundColor(0x77080C14.toInt())
         }
         frameLayout.addView(darkOverlay)
 
@@ -212,7 +214,7 @@ class MainActivity : Activity() {
 
         val wCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = glass(35, 22, Color.argb(70, 255, 255, 255), 1)
+            background = glass(140, 22, Color.argb(80, 255, 255, 255), 1)
             setPadding(dp(18), dp(12), dp(18), dp(12))
 
             val wHeader = LinearLayout(context).apply {
@@ -246,7 +248,7 @@ class MainActivity : Activity() {
 
         val pCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = glass(35, 22, Color.argb(70, 255, 255, 255), 1)
+            background = glass(140, 22, Color.argb(80, 255, 255, 255), 1)
             setPadding(dp(18), dp(10), dp(18), dp(10))
 
             addView(tv(13f, true, Color.argb(220, 255, 255, 255)).apply {
@@ -328,7 +330,7 @@ class MainActivity : Activity() {
 
         favDockContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = glass(32, 26, Color.argb(60, 255, 255, 255), 1)
+            background = glass(130, 26, Color.argb(75, 255, 255, 255), 1)
             setPadding(dp(14), dp(12), dp(14), dp(12))
             clipChildren = false
             clipToPadding = false
@@ -369,6 +371,9 @@ class MainActivity : Activity() {
             setPadding(0, dp(6), 0, dp(40))
         }
         rootContainer.addView(allGrid, LinearLayout.LayoutParams(-1, -2))
+
+        // هذا هو السطر الذي كان مفقوداً وتسبب في اختفاء الواجهة!
+        mainScroll.addView(rootContainer)
 
         frameLayout.addView(mainScroll)
         setContentView(frameLayout)
@@ -446,7 +451,7 @@ class MainActivity : Activity() {
             init {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                background = glass(40, 16, Color.argb(80, 255, 255, 255), 1)
+                background = glass(120, 16, Color.argb(90, 255, 255, 255), 1)
                 setPadding(dp(10), dp(8), dp(10), dp(8))
                 isFocusable = true
                 isClickable = true
@@ -456,7 +461,7 @@ class MainActivity : Activity() {
                 setOnFocusChangeListener { _, f ->
                     isFocusedState = f
                     titleTv.visibility = if (f) View.VISIBLE else View.GONE
-                    background = glass(if (f) 140 else 40, 16, if (f) Color.WHITE else Color.argb(80, 255, 255, 255), if (f) 2 else 1)
+                    background = glass(if (f) 200 else 120, 16, if (f) Color.WHITE else Color.argb(90, 255, 255, 255), if (f) 2 else 1)
                     animate().scaleX(if (f) 1.08f else 1f).scaleY(if (f) 1.08f else 1f).setDuration(120).start()
                 }
 
@@ -514,7 +519,7 @@ class MainActivity : Activity() {
         val sources = listOf("HDMI 1", "HDMI 2", "HDMI 3", "AV / Composite", "USB Media Player", "VGA")
         for (src in sources) {
             val btn = LinearLayout(this).apply {
-                background = glass(40, 14)
+                background = glass(100, 14)
                 setPadding(dp(16), dp(11), dp(16), dp(11))
                 isFocusable = true
                 isClickable = true
@@ -523,7 +528,7 @@ class MainActivity : Activity() {
                     dialog.dismiss()
                 }
                 setOnFocusChangeListener { v, f ->
-                    v.background = glass(if (f) 120 else 40, 14, if (f) Color.WHITE else Color.TRANSPARENT, if (f) 2 else 0)
+                    v.background = glass(if (f) 180 else 100, 14, if (f) Color.WHITE else Color.TRANSPARENT, if (f) 2 else 0)
                 }
                 addView(tv(14f, true).apply { text = src })
             }
@@ -555,12 +560,12 @@ class MainActivity : Activity() {
             })
         }
         val closeBtn = LinearLayout(this).apply {
-            background = glass(50, 14)
+            background = glass(100, 14)
             setPadding(dp(16), dp(10), dp(16), dp(10))
             isFocusable = true
             isClickable = true
             setOnClickListener { dialog.dismiss() }
-            setOnFocusChangeListener { v, f -> v.background = glass(if (f) 120 else 50, 14, if (f) Color.WHITE else Color.TRANSPARENT, if (f) 2 else 0) }
+            setOnFocusChangeListener { v, f -> v.background = glass(if (f) 180 else 100, 14, if (f) Color.WHITE else Color.TRANSPARENT, if (f) 2 else 0) }
             addView(tv(14f, true).apply { text = "إغلاق"; gravity = Gravity.CENTER })
         }
         sheet.addView(closeBtn, LinearLayout.LayoutParams(dp(340), -2))
@@ -587,7 +592,7 @@ class MainActivity : Activity() {
         })
 
         val items = listOf(
-            "🖼️ تثبيت خلفية السيارة الفخمة كافتراضي" to {
+            "🖼️ استعادة الخلفية الافتراضية" to {
                 prefs.edit().putString("custom_bg_url", defaultCustomBgUrl).apply()
                 applyCustomBackground()
                 dialog.dismiss()
@@ -615,13 +620,13 @@ class MainActivity : Activity() {
             val rowBtn = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                background = glass(40, 16, Color.argb(60, 255, 255, 255), 1)
+                background = glass(100, 16, Color.argb(60, 255, 255, 255), 1)
                 setPadding(dp(18), dp(12), dp(18), dp(12))
                 isFocusable = true
                 isClickable = true
                 setOnClickListener { action() }
                 setOnFocusChangeListener { v, f ->
-                    v.background = glass(if (f) 120 else 40, 16, if (f) Color.WHITE else Color.argb(60, 255, 255, 255), if (f) 2 else 1)
+                    v.background = glass(if (f) 180 else 100, 16, if (f) Color.WHITE else Color.argb(60, 255, 255, 255), if (f) 2 else 1)
                     v.animate().scaleX(if (f) 1.04f else 1f).scaleY(if (f) 1.04f else 1f).setDuration(110).start()
                 }
                 addView(tv(14f, true).apply { text = label })
@@ -708,13 +713,13 @@ class MainActivity : Activity() {
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_HORIZONTAL
-                background = glass(38, 18, Color.argb(70, 255, 255, 255), 1)
+                background = glass(140, 18, Color.argb(80, 255, 255, 255), 1)
                 setPadding(dp(12), dp(8), dp(12), dp(8))
                 isFocusable = true
                 isClickable = true
 
                 setOnFocusChangeListener { v, focused ->
-                    v.background = glass(if (focused) 110 else 38, 18, if (focused) Color.WHITE else Color.argb(70, 255, 255, 255), if (focused) 2 else 1)
+                    v.background = glass(if (focused) 200 else 140, 18, if (focused) Color.WHITE else Color.argb(80, 255, 255, 255), if (focused) 2 else 1)
                     v.animate().scaleX(if (focused) 1.07f else 1f).scaleY(if (focused) 1.07f else 1f).setDuration(120).start()
                 }
 
@@ -1015,13 +1020,13 @@ class MainActivity : Activity() {
 
         for ((title, act) in options) {
             val b = LinearLayout(this).apply {
-                background = glass(40, 14)
+                background = glass(100, 14)
                 setPadding(dp(16), dp(10), dp(16), dp(10))
                 isFocusable = true
                 isClickable = true
                 setOnClickListener { dialog.dismiss(); act() }
                 setOnFocusChangeListener { v, f ->
-                    v.background = glass(if (f) 120 else 40, 14, if (f) Color.WHITE else Color.TRANSPARENT, if (f) 2 else 0)
+                    v.background = glass(if (f) 180 else 100, 14, if (f) Color.WHITE else Color.TRANSPARENT, if (f) 2 else 0)
                 }
                 addView(tv(14f, true).apply { text = title })
             }
@@ -1095,7 +1100,7 @@ class MainActivity : Activity() {
                             orientation = LinearLayout.HORIZONTAL
                             gravity = Gravity.CENTER_VERTICAL
                             setPadding(dp(6), dp(1), dp(6), dp(1))
-                            if (isNext) background = glass(60, 8)
+                            if (isNext) background = glass(180, 8)
 
                             addView(tv(11.5f, isNext, if (isNext) Color.parseColor("#4DEEEA") else Color.argb(200, 255, 255, 255)).apply {
                                 text = p.first
