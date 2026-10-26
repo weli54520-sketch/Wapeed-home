@@ -18,7 +18,7 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
-import android.view.Window
+import android.view.ViewGroup
 import android.widget.*
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -59,7 +59,6 @@ class MainActivity : Activity() {
     private val logoCache = ConcurrentHashMap<String, Bitmap>()
     private val bgCache = ConcurrentHashMap<String, Bitmap>()
 
-    // خلفية السيارة والحصان التي اخترتها كخلفية رئيسية
     private val defaultCustomBgUrl = "https://images.unsplash.com/photo-1552519507-da3b142c6e3d?q=80&w=1920&auto=format&fit=crop"
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -132,17 +131,15 @@ class MainActivity : Activity() {
             setBackgroundColor(0xFF0A0F18.toInt())
         }
 
-        // الخلفية (صورة السيارة والحصان الفخمة) مع تغطية زجاجية داكنة خفيفة
         backgroundImageView = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
             layoutParams = ViewGroup.LayoutParams(-1, -1)
         }
         frameLayout.addView(backgroundImageView)
-        applyCustomBackground()
 
         val darkOverlay = View(this).apply {
             layoutParams = ViewGroup.LayoutParams(-1, -1)
-            setBackgroundColor(0x600A0F18.toInt()) // طبقة تعتيم سينمائية تبرز النصوص والبطاقات
+            setBackgroundColor(0x600A0F18.toInt())
         }
         frameLayout.addView(darkOverlay)
 
@@ -160,9 +157,8 @@ class MainActivity : Activity() {
             clipToPadding = false
         }
 
-        // ==========================================
-        // 1. شريط النظام العلوي (الكبسولات المتوسعة بالتركيز)
-        // ==========================================
+        applyCustomBackground()
+
         val statusHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -170,7 +166,6 @@ class MainActivity : Activity() {
             clipChildren = false
             clipToPadding = false
         }
-
         statusHeader.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
 
         val interactiveCapsulesRow = LinearLayout(this).apply {
@@ -203,9 +198,6 @@ class MainActivity : Activity() {
         statusHeader.addView(interactiveCapsulesRow)
         rootContainer.addView(statusHeader)
 
-        // ==========================================
-        // 2. القسم العلوي (الطقس والصلاة متطابقين + الساعة)
-        // ==========================================
         val topWidgetsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -216,7 +208,6 @@ class MainActivity : Activity() {
         val widgetWidth = dp(235)
         val widgetHeight = dp(148)
 
-        // --- أ: بطاقة الطقس (الرياض) ---
         val wCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = glass(35, 22, Color.argb(70, 255, 255, 255), 1)
@@ -251,7 +242,6 @@ class MainActivity : Activity() {
         }
         topWidgetsRow.addView(wCard, LinearLayout.LayoutParams(widgetWidth, widgetHeight))
 
-        // --- ب: بطاقة مواقيت الصلاة (الرياض) ---
         val pCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = glass(35, 22, Color.argb(70, 255, 255, 255), 1)
@@ -278,7 +268,6 @@ class MainActivity : Activity() {
 
         topWidgetsRow.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
 
-        // --- ج: الساعة والتاريخ ---
         val clockBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.END
@@ -296,9 +285,6 @@ class MainActivity : Activity() {
         topWidgetsRow.addView(clockBox)
         rootContainer.addView(topWidgetsRow)
 
-        // ==========================================
-        // 3. مباريات اليوم بشعارات الأندية الآسيوية والعالمية الحقيقية
-        // ==========================================
         val mHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -326,9 +312,6 @@ class MainActivity : Activity() {
         }
         rootContainer.addView(mScroll, LinearLayout.LayoutParams(-1, -2))
 
-        // ==========================================
-        // 4. الدوك السفلي للمفضلة (Apple TV 4K Style)
-        // ==========================================
         val favHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -364,9 +347,6 @@ class MainActivity : Activity() {
         favDockContainer.addView(favScroll, LinearLayout.LayoutParams(-1, -2))
         rootContainer.addView(favDockContainer, LinearLayout.LayoutParams(-1, -2))
 
-        // ==========================================
-        // 5. درج جميع التطبيقات الكامل
-        // ==========================================
         val dHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -392,9 +372,6 @@ class MainActivity : Activity() {
         setContentView(frameLayout)
     }
 
-    // ==========================================
-    // الكبسولات العلوية المتوسعة عند التركيز (Expand on Focus)
-    // ==========================================
     enum class IconType { WIFI, SETTINGS, GRID, SOURCES, PRAYER }
 
     private fun createExpandingCapsule(label: String, type: IconType, onClick: () -> Unit): View {
@@ -515,9 +492,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // ==========================================
-    // قوائم الإعدادات والمصادر التفاعلية
-    // ==========================================
     private fun openSourcesDialog() {
         val dialog = Dialog(this)
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
@@ -679,9 +653,6 @@ class MainActivity : Activity() {
             .show()
     }
 
-    // ==========================================
-    // مباريات اليوم بشعارات الأندية الآسيوية والأوروبية الحقيقية
-    // ==========================================
     data class ClubMatch(
         val league: String,
         val round: String,
@@ -842,9 +813,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // ==========================================
-    // بطاقات التطبيقات بنمط Apple TV 4K الممتلئة والناعمة
-    // ==========================================
     private fun loadAppsAndDock() {
         val pm = packageManager
         val list = (pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER), 0) +
@@ -1055,20 +1023,13 @@ class MainActivity : Activity() {
                 }
                 addView(tv(14f, true).apply { text = title })
             }
-            box.addWidget(b, LinearLayout.LayoutParams(dp(320), -2).apply { bottomMargin = dp(8) })
+            box.addView(b, LinearLayout.LayoutParams(dp(320), -2).apply { bottomMargin = dp(8) })
         }
 
         dialog.setContentView(box)
         dialog.show()
     }
 
-    private fun ViewGroup.addWidget(child: View, params: ViewGroup.LayoutParams) {
-        addView(child, params)
-    }
-
-    // ==========================================
-    // محركات الوقت والطقس ومواقيت الصلاة
-    // ==========================================
     private fun startEngines() {
         renderMatchesWithRealCrests()
         updateClockEngine()
@@ -1090,7 +1051,6 @@ class MainActivity : Activity() {
 
     private fun refreshRiyadhLiveFeeds() {
         thread {
-            // طقس الرياض
             try {
                 val w = JSONObject(URL("https://api.open-meteo.com/v1/forecast?latitude=24.7136&longitude=46.6753&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code").readText()).getJSONObject("current")
                 val t = Math.round(w.getDouble("temperature_2m"))
@@ -1111,7 +1071,6 @@ class MainActivity : Activity() {
                 }
             } catch (e: Throwable) { }
 
-            // مواقيت الصلاة (الرياض - أم القرى)
             try {
                 val t = JSONObject(URL("https://api.aladhan.com/v1/timingsByCity?city=Riyadh&country=SA&method=4").readText()).getJSONObject("data").getJSONObject("timings")
                 val list = listOf(
