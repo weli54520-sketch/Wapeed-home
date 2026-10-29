@@ -1,5 +1,7 @@
 package com.riyadh.home
 
+import android.animation.ArgbEvaluator
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.Dialog
@@ -18,6 +20,7 @@ import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
+import android.view.ViewOutlineProvider
 import android.view.Window
 import android.widget.*
 import java.net.HttpURLConnection
@@ -31,6 +34,42 @@ import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
 
+class AmbientView(c: Context) : View(c) {
+    private var color = 0xFF3B2A6B.toInt()
+    private var from = color
+    private var to = color
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val anim = ValueAnimator.ofFloat(0f, 1f).apply {
+        duration = 700
+        addUpdateListener {
+            color = ArgbEvaluator().evaluate(it.animatedValue as Float, from, to) as Int
+            invalidate()
+        }
+    }
+
+    fun glow(target: Int) {
+        if (target == to) return
+        from = color
+        to = target
+        anim.cancel()
+        anim.start()
+    }
+
+    override fun onDraw(cv: Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val r = Color.red(color)
+        val g = Color.green(color)
+        val b = Color.blue(color)
+        paint.shader = LinearGradient(0f, 0f, w, h, intArrayOf(0xFF05070F.toInt(), 0xFF0D1530.toInt(), 0xFF150F2B.toInt()), null, Shader.TileMode.CLAMP)
+        cv.drawRect(0f, 0f, w, h, paint)
+        paint.shader = RadialGradient(w * 0.85f, h * 0.15f, w * 0.6f, Color.argb(125, r, g, b), Color.TRANSPARENT, Shader.TileMode.CLAMP)
+        cv.drawRect(0f, 0f, w, h, paint)
+        paint.shader = RadialGradient(w * 0.1f, h * 0.95f, w * 0.55f, Color.argb(80, r, g, b), Color.TRANSPARENT, Shader.TileMode.CLAMP)
+        cv.drawRect(0f, 0f, w, h, paint)
+    }
+}
+
 class MainActivity : Activity() {
     private val ar = Locale("ar", "SA")
     private val ui = Handler(Looper.getMainLooper())
@@ -38,13 +77,15 @@ class MainActivity : Activity() {
     private val accent = Color.parseColor("#4DEEEA")
     private val gold = Color.parseColor("#FFEAA7")
     private val dim = Color.argb(200, 255, 255, 255)
+    private val homeGlow = 0xFF3B2A6B.toInt()
 
+    private lateinit var ambient: AmbientView
     private lateinit var backgroundImageView: ImageView
+    private lateinit var overlay: View
     private lateinit var pages: List<View>
     private lateinit var tabViews: List<TextView>
     private var currentPage = 0
     private lateinit var favRow: LinearLayout
-    private lateinit var favLabel: TextView
     private lateinit var allGrid: GridLayout
     private lateinit var matchesGrid: GridLayout
     private lateinit var heroBox: LinearLayout
@@ -66,7 +107,21 @@ class MainActivity : Activity() {
     private val logoCache = ConcurrentHashMap<String, Bitmap>()
     private val bgCache = ConcurrentHashMap<String, Bitmap>()
     private val feedsTask = Runnable { fetchMatches(); refreshFeeds() }
-    private val defaultBgUrl = "https://images.unsplash.com/photo-1503376780353-7e6692767b70?q=80&w=1920&auto=format&fit=crop"
+
+    private val weights = mapOf(
+        "الهلال" to 100, "ريال مدريد" to 90, "برشلونة" to 90, "مانشستر سيتي" to 90,
+        "النصر" to 60, "الاتحاد" to 60, "الأهلي" to 60,
+        "ليفربول" to 70, "أرسنال" to 70, "بايرن ميونخ" to 70, "باريس سان جيرمان" to 70,
+        "أتلتيكو مدريد" to 70, "مانشستر يونايتد" to 70, "تشيلسي" to 70, "إنتر ميلان" to 70,
+        "ميلان" to 70, "يوفنتوس" to 70, "دورتموند" to 70
+    )
+
+    private fun score(m: Match) = (weights[m.home] ?: 0) + (weights[m.away] ?: 0)
+    private fun strong(m: Match): Boolean {
+        val s = score(m)
+        return if (m.league == "دوري روشن السعودي" || m.league == "أبطال آسيا للنخبة") s >= 60 else s >= 90
+    }
+    private fun rank(m: Match) = score(m) + (if (m.live) 60 else 0) - (if (m.note == "انتهت") 200 else 0)
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     private fun city(): City = Data.cities[prefs.getInt("city_idx", 0).coerceIn(0, Data.cities.size - 1)]
@@ -117,31 +172,42 @@ class MainActivity : Activity() {
     }
 
     private fun applyCustomBackground() {
-        val bgUrl = prefs.getString("custom_bg_url", defaultBgUrl) ?: defaultBgUrl
-        val cached = bgCache[bgUrl]
-        if (cached != null) {
-            backgroundImageView.setImageBitmap(cached)
+        val url = prefs.getString("custom_bg_url", "") ?: ""
+        if (url.isEmpty()) {
+            backgroundImageView.visibility = View.GONE
+            overlay.visibility = View.GONE
             return
         }
+        val cached = bgCache[url]
+        if (cached != null) { showBg(cached); return }
         thread {
             try {
-                val conn = URL(bgUrl).openConnection() as HttpURLConnection
+                val conn = URL(url).openConnection() as HttpURLConnection
                 conn.connectTimeout = 6000
                 conn.readTimeout = 6000
                 val bmp = BitmapFactory.decodeStream(conn.inputStream)
                 if (bmp != null) {
-                    bgCache[bgUrl] = bmp
-                    ui.post { backgroundImageView.setImageBitmap(bmp) }
+                    bgCache[url] = bmp
+                    ui.post { showBg(bmp) }
                 }
             } catch (e: Throwable) { }
         }
     }
 
+    private fun showBg(b: Bitmap) {
+        backgroundImageView.setImageBitmap(b)
+        backgroundImageView.visibility = View.VISIBLE
+        overlay.visibility = View.VISIBLE
+    }
+
     private fun buildInterface() {
-        val frame = FrameLayout(this).apply { setBackgroundColor(0xFF0A0F18.toInt()) }
-        backgroundImageView = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP }
+        val frame = FrameLayout(this).apply { setBackgroundColor(0xFF05070F.toInt()) }
+        ambient = AmbientView(this)
+        frame.addView(ambient, FrameLayout.LayoutParams(-1, -1))
+        backgroundImageView = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP; visibility = View.GONE }
         frame.addView(backgroundImageView, FrameLayout.LayoutParams(-1, -1))
-        frame.addView(View(this).apply { setBackgroundColor(0x88080C14.toInt()) }, FrameLayout.LayoutParams(-1, -1))
+        overlay = View(this).apply { setBackgroundColor(0x99080C14.toInt()); visibility = View.GONE }
+        frame.addView(overlay, FrameLayout.LayoutParams(-1, -1))
         applyCustomBackground()
 
         val root = LinearLayout(this).apply {
@@ -163,8 +229,16 @@ class MainActivity : Activity() {
 
     private fun showPage(i: Int) {
         currentPage = i
-        pages.forEachIndexed { k, p -> p.visibility = if (k == i) View.VISIBLE else View.GONE }
+        pages.forEachIndexed { k, p ->
+            if (k == i) {
+                p.visibility = View.VISIBLE
+                p.alpha = 0f
+                p.translationY = dp(14).toFloat()
+                p.animate().alpha(1f).translationY(0f).setDuration(280).start()
+            } else p.visibility = View.GONE
+        }
         tabViews.forEachIndexed { k, t -> t.setTextColor(if (k == i) accent else Color.WHITE) }
+        ambient.glow(homeGlow)
     }
 
     private fun buildHeader(): View {
@@ -281,8 +355,8 @@ class MainActivity : Activity() {
         col.addView(tv(15f, true).apply { text = "المفضلة"; setPadding(dp(4), dp(16), 0, dp(6)) })
         val dock = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = glass(130, 26)
-            setPadding(dp(16), dp(14), dp(16), dp(10))
+            background = glass(110, 28)
+            setPadding(dp(18), dp(14), dp(18), dp(8))
             clipChildren = false
             clipToPadding = false
         }
@@ -290,7 +364,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             clipChildren = false
             clipToPadding = false
-            setPadding(0, dp(6), 0, dp(6))
+            setPadding(0, dp(8), 0, dp(6))
         }
         dock.addView(HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
@@ -298,8 +372,6 @@ class MainActivity : Activity() {
             clipToPadding = false
             addView(favRow)
         }, LinearLayout.LayoutParams(-1, -2))
-        favLabel = tv(13f, true, dim).apply { text = ""; setPadding(dp(4), dp(6), 0, 0) }
-        dock.addView(favLabel)
         col.addView(dock, LinearLayout.LayoutParams(-1, -2))
 
         return ScrollView(this).apply {
@@ -317,7 +389,7 @@ class MainActivity : Activity() {
             clipToPadding = false
             setPadding(dp(4), dp(8), dp(4), dp(24))
         }
-        col.addView(tv(20f, true).apply { text = "مباريات اليوم"; setPadding(dp(4), dp(6), 0, dp(8)) })
+        col.addView(tv(20f, true).apply { text = "أقوى مباريات اليوم"; setPadding(dp(4), dp(6), 0, dp(8)) })
         matchesGrid = GridLayout(this).apply {
             columnCount = 3
             clipChildren = false
@@ -334,7 +406,7 @@ class MainActivity : Activity() {
 
     private fun buildAppsPage(): View {
         allGrid = GridLayout(this).apply {
-            columnCount = 6
+            columnCount = 5
             clipChildren = false
             clipToPadding = false
             setPadding(dp(4), dp(10), dp(4), dp(30))
@@ -379,16 +451,6 @@ class MainActivity : Activity() {
                     path.fillType = Path.FillType.EVEN_ODD
                     path.addCircle(cx, cy, 4f * d, Path.Direction.CW)
                     cv.drawPath(path, p)
-                }
-                2 -> {
-                    p.style = Paint.Style.FILL
-                    val s = 5.5f * d
-                    val g = 2f * d
-                    for (ox in listOf(0, 1)) for (oy in listOf(0, 1)) {
-                        val l = cx - g / 2 - s + ox * (s + g)
-                        val t = cy - g / 2 - s + oy * (s + g)
-                        cv.drawRoundRect(l, t, l + s, t + s, 2 * d, 2 * d, p)
-                    }
                 }
                 else -> {
                     p.style = Paint.Style.STROKE
@@ -496,9 +558,9 @@ class MainActivity : Activity() {
         card("📍", "المدينة", city().name) { openCityPicker() }
         card("📶", "الواي فاي", "الشبكة والاتصال") { go(Intent(Settings.ACTION_WIFI_SETTINGS)) }
         card("⚙️", "إعدادات الجهاز", "النظام الأساسية") { go(Intent(Settings.ACTION_SETTINGS)) }
-        card("🖼️", "خلفية مخصصة", "رابط صورة") { showBgUrlDialog() }
-        card("♻️", "الخلفية الافتراضية", "استعادة الأصلية") {
-            prefs.edit().putString("custom_bg_url", defaultBgUrl).apply()
+        card("🖼️", "صورة خلفية خاصة", "رابط صورة") { showBgUrlDialog() }
+        card("✨", "الخلفية المضيئة", "استعادة الافتراضية") {
+            prefs.edit().remove("custom_bg_url").apply()
             applyCustomBackground()
         }
         card("⚽", "تحديث المباريات", "الآن") { fetchMatches() }
@@ -532,13 +594,13 @@ class MainActivity : Activity() {
     private fun showBgUrlDialog() {
         val input = EditText(this).apply {
             hint = "أدخل رابط صورة مباشر (HTTPS)"
-            setText(prefs.getString("custom_bg_url", defaultBgUrl))
+            setText(prefs.getString("custom_bg_url", ""))
             setTextColor(Color.WHITE)
             setHintTextColor(Color.GRAY)
             setPadding(dp(14), dp(14), dp(14), dp(14))
         }
         AlertDialog.Builder(this)
-            .setTitle("تغيير خلفية الواجهة")
+            .setTitle("صورة خلفية الواجهة")
             .setView(input)
             .setPositiveButton("تطبيق") { _, _ ->
                 val url = input.text.toString().trim()
@@ -558,24 +620,19 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun pickHero(l: List<Match>): Match {
-        val pri = listOf("دوري أبطال أوروبا", "دوري روشن السعودي", "أبطال آسيا للنخبة", "الدوري الإسباني", "الدوري الإنجليزي")
-        val c = l.filter { it.note != "انتهت" }.ifEmpty { l }
-        return c.firstOrNull { it.live } ?: c.sortedWith(compareBy<Match>({ pri.indexOf(it.league) }, { it.time })).first()
-    }
-
     private fun renderMatches() {
         if (!::heroBox.isInitialized) return
         heroBox.removeAllViews()
         matchesGrid.removeAllViews()
-        val list = matchesData
+        val all = matchesData
+        val list = all?.filter { strong(it) }?.sortedByDescending { rank(it) }
         if (list == null || list.isEmpty()) {
-            val msg = if (list == null) "تعذر تحميل المباريات، تأكد من الاتصال" else "لا توجد مباريات مهمة اليوم"
+            val msg = if (all == null) "تعذر تحميل المباريات، تأكد من الاتصال" else "لا توجد مباريات قوية اليوم"
             heroBox.addView(tv(15f, false, dim).apply { text = msg; setPadding(dp(8), dp(14), dp(8), dp(14)) })
             matchesGrid.addView(tv(15f, false, dim).apply { text = msg; setPadding(dp(8), dp(14), dp(8), dp(14)) })
             return
         }
-        heroBox.addView(matchCard(pickHero(list), true), LinearLayout.LayoutParams(dp(600), -2))
+        heroBox.addView(matchCard(list.first(), true), LinearLayout.LayoutParams(dp(620), -2))
         val w = ((resources.displayMetrics.widthPixels - dp(90)) / 3) - dp(16)
         for (m in list) {
             matchesGrid.addView(matchCard(m, false), GridLayout.LayoutParams().apply {
@@ -679,80 +736,111 @@ class MainActivity : Activity() {
 
         favRow.removeAllViews()
         val favList = if (favPkgs.isNotEmpty()) favPkgs.mapNotNull { pkg -> allApps.find { it.activityInfo.packageName == pkg } } else allApps.take(7)
-        for (a in favList) favRow.addView(createTile(a, true), LinearLayout.LayoutParams(dp(112), dp(78)).apply { marginEnd = dp(12) })
+        for (a in favList) favRow.addView(createCell(a, dp(176)), LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(14) })
 
         allGrid.removeAllViews()
-        val gw = ((resources.displayMetrics.widthPixels - dp(72)) / 6) - dp(12)
+        val gw = ((resources.displayMetrics.widthPixels - dp(72)) / 5) - dp(20)
         for (a in allApps) {
-            allGrid.addView(createTile(a, false), GridLayout.LayoutParams().apply {
-                width = gw
-                height = dp(96)
-                setMargins(dp(6), dp(6), dp(6), dp(6))
+            allGrid.addView(createCell(a, gw), GridLayout.LayoutParams().apply {
+                width = -2
+                height = -2
+                setMargins(dp(10), dp(10), dp(10), dp(10))
             })
         }
-        if (currentPage == 0 && favRow.childCount > 0) favRow.getChildAt(0)?.requestFocus()
+        if (currentPage == 0) ((favRow.getChildAt(0) as? LinearLayout)?.getChildAt(0))?.requestFocus()
     }
 
-    private fun resolveBrandColors(label: String, pkg: String, icon: Drawable): Pair<Int, Int> {
+    private fun dominant(d: Drawable): Int = try {
+        val dd = d.constantState?.newDrawable()?.mutate() ?: d
+        val bmp = Bitmap.createBitmap(24, 24, Bitmap.Config.ARGB_8888)
+        dd.setBounds(0, 0, 24, 24)
+        dd.draw(Canvas(bmp))
+        var r = 0L
+        var g = 0L
+        var b = 0L
+        var n = 0
+        for (x in 0 until 24) for (y in 0 until 24) {
+            val px = bmp.getPixel(x, y)
+            val pr = Color.red(px)
+            val pg = Color.green(px)
+            val pb = Color.blue(px)
+            if (Color.alpha(px) > 128 && !(pr > 235 && pg > 235 && pb > 235) && pr + pg + pb > 60) {
+                r += pr; g += pg; b += pb; n++
+            }
+        }
+        if (n < 10) 0xFF3B4A7A.toInt() else Color.rgb((r / n).toInt(), (g / n).toInt(), (b / n).toInt())
+    } catch (e: Throwable) { 0xFF3B4A7A.toInt() }
+
+    private fun darker(c: Int) = Color.rgb((Color.red(c) * 0.55f).toInt(), (Color.green(c) * 0.55f).toInt(), (Color.blue(c) * 0.55f).toInt())
+
+    private fun brandBg(label: String, pkg: String, icon: Drawable): Int {
         val key = "$label $pkg".lowercase(Locale.ROOT)
         return when {
-            key.contains("youtube") || key.contains("يوتيوب") -> Color.WHITE to Color.parseColor("#212121")
-            key.contains("netflix") -> Color.parseColor("#181818") to Color.parseColor("#E50914")
-            key.contains("prime") -> Color.parseColor("#00A8E1") to Color.WHITE
-            key.contains("plex") -> Color.parseColor("#1F1F1F") to Color.parseColor("#E5A00D")
-            key.contains("apple") -> Color.parseColor("#141414") to Color.WHITE
-            key.contains("downloader") -> Color.parseColor("#F57C00") to Color.WHITE
-            key.contains("aroma") -> Color.parseColor("#B71C1C") to Color.WHITE
-            key.contains("viu") -> Color.parseColor("#FBC02D") to Color.parseColor("#212121")
-            key.contains("vlc") -> Color.parseColor("#FB8C00") to Color.WHITE
-            else -> dominant(icon) to Color.WHITE
+            key.contains("youtube") || key.contains("يوتيوب") -> Color.WHITE
+            key.contains("netflix") -> Color.parseColor("#181818")
+            key.contains("prime") -> Color.parseColor("#00A8E1")
+            key.contains("plex") -> Color.parseColor("#1F1F1F")
+            key.contains("apple") -> Color.parseColor("#141414")
+            key.contains("downloader") -> Color.parseColor("#F57C00")
+            key.contains("aroma") -> Color.parseColor("#B71C1C")
+            key.contains("viu") -> Color.parseColor("#FBC02D")
+            key.contains("vlc") -> Color.parseColor("#FB8C00")
+            else -> darker(dominant(icon))
         }
     }
 
-    private fun dominant(drawable: Drawable): Int {
-        return try {
-            val bmp = Bitmap.createBitmap(24, 24, Bitmap.Config.ARGB_8888)
-            drawable.setBounds(0, 0, 24, 24)
-            drawable.draw(Canvas(bmp))
-            val px = bmp.getPixel(12, 12)
-            if (Color.alpha(px) < 120) Color.parseColor("#28354A")
-            else Color.rgb((Color.red(px) * 0.75f).toInt(), (Color.green(px) * 0.75f).toInt(), (Color.blue(px) * 0.75f).toInt())
-        } catch (e: Throwable) { Color.parseColor("#28354A") }
-    }
-
-    private fun createTile(app: ResolveInfo, dock: Boolean): View {
+    private fun createCell(app: ResolveInfo, w: Int): View {
         val pm = packageManager
         val pkg = app.activityInfo.packageName
         val label = app.loadLabel(pm).toString()
         val icon = app.loadIcon(pm)
-        val (bg, fg) = resolveBrandColors(label, pkg, icon)
-        val t = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            background = solidCard(bg, 18, Color.argb(60, 255, 255, 255), 1)
-            setPadding(dp(10), dp(8), dp(10), dp(8))
+        val banner: Drawable? = try { app.activityInfo.loadBanner(pm) ?: app.activityInfo.applicationInfo.loadBanner(pm) } catch (e: Throwable) { null }
+        val bg = if (banner != null) 0xFF121826.toInt() else brandBg(label, pkg, icon)
+        val glowC = dominant(banner ?: icon)
+        val th = w * 9 / 16
+
+        val tile = FrameLayout(this).apply {
+            background = solidCard(bg, 20, Color.argb(60, 255, 255, 255), 1)
             isFocusable = true
             isClickable = true
             setOnClickListener { go(Intent(Intent.ACTION_MAIN).setClassName(pkg, app.activityInfo.name)) }
             setOnLongClickListener { showAppMenu(app); true }
             setOnFocusChangeListener { v, f ->
-                v.animate().scaleX(if (f) 1.12f else 1f).scaleY(if (f) 1.12f else 1f).translationY(if (f) -dp(4).toFloat() else 0f).setDuration(120).start()
-                v.background = solidCard(bg, 18, if (f) Color.WHITE else Color.argb(60, 255, 255, 255), if (f) 3 else 1)
-                v.elevation = if (f) 24f else 4f
-                if (f && dock) favLabel.text = label
+                v.animate().scaleX(if (f) 1.1f else 1f).scaleY(if (f) 1.1f else 1f)
+                    .translationY(if (f) -dp(4).toFloat() else 0f).setDuration(140).start()
+                v.background = solidCard(bg, 20, if (f) Color.WHITE else Color.argb(60, 255, 255, 255), if (f) 3 else 1)
+                v.elevation = if (f) 26f else 4f
+                if (f) ambient.glow(glowC)
             }
         }
-        val size = dp(46)
-        t.addView(ImageView(this).apply { setImageDrawable(icon); scaleType = ImageView.ScaleType.FIT_CENTER }, LinearLayout.LayoutParams(size, size))
-        if (!dock) t.addView(tv(11.5f, true, fg).apply { text = label; maxLines = 1; gravity = Gravity.CENTER; setPadding(0, dp(4), 0, 0) })
-        return t
+        if (banner != null) {
+            tile.addView(ImageView(this).apply {
+                setImageDrawable(banner)
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                clipToOutline = true
+                outlineProvider = object : ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: Outline) {
+                        outline.setRoundRect(0, 0, view.width, view.height, dp(16).toFloat())
+                    }
+                }
+            }, FrameLayout.LayoutParams(-1, -1).apply { setMargins(dp(3), dp(3), dp(3), dp(3)) })
+        } else {
+            tile.addView(ImageView(this).apply {
+                setImageDrawable(icon)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+            }, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER))
+        }
+        val cell = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; clipChildren = false; clipToPadding = false }
+        cell.addView(tile, LinearLayout.LayoutParams(w, th))
+        cell.addView(tv(12f, true, dim).apply { text = label; maxLines = 1; gravity = Gravity.CENTER; setPadding(0, dp(8), 0, 0) },
+            LinearLayout.LayoutParams(w, -2))
+        return cell
     }
 
     private fun showAppMenu(app: ResolveInfo) {
         val pkg = app.activityInfo.packageName
         val label = app.loadLabel(packageManager).toString()
-        val favs = (prefs.getString("fav_apps", "")?.split(",")?.filter { it.isNotEmpty() }
-            ?: emptyList()).toMutableList()
+        val favs = (prefs.getString("fav_apps", "")?.split(",")?.filter { it.isNotEmpty() } ?: emptyList()).toMutableList()
         if (favs.isEmpty()) favs.addAll(allApps.take(7).map { it.activityInfo.packageName })
         val inFav = favs.contains(pkg)
         val idx = favs.indexOf(pkg)
@@ -769,12 +857,8 @@ class MainActivity : Activity() {
             if (inFav) favs.remove(pkg) else favs.add(pkg)
             save()
         })
-        if (inFav && idx > 0) opts.add("تحريك لليمين (تقديم) ▶" to {
-            favs.removeAt(idx); favs.add(idx - 1, pkg); save()
-        })
-        if (inFav && idx < favs.size - 1) opts.add("تحريك لليسار (تأخير) ◀" to {
-            favs.removeAt(idx); favs.add(idx + 1, pkg); save()
-        })
+        if (inFav && idx > 0) opts.add("تحريك لليمين (تقديم) ▶" to { favs.removeAt(idx); favs.add(idx - 1, pkg); save() })
+        if (inFav && idx < favs.size - 1) opts.add("تحريك لليسار (تأخير) ◀" to { favs.removeAt(idx); favs.add(idx + 1, pkg); save() })
         opts.add("معلومات التطبيق ℹ️" to { go(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply { data = Uri.fromParts("package", pkg, null) }) })
         opts.add("إلغاء تثبيت التطبيق 🗑️" to { go(Intent(Intent.ACTION_DELETE).apply { data = Uri.fromParts("package", pkg, null) }) })
         for ((title, act) in opts) {
