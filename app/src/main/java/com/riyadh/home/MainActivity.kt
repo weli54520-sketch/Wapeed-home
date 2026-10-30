@@ -21,7 +21,9 @@ import android.os.Looper
 import android.provider.Settings
 import android.text.TextUtils
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.Window
 import android.widget.*
@@ -41,13 +43,40 @@ class AmbientView(c: Context) : View(c) {
     private var color = 0xFF3B2A6B.toInt()
     private var from = color
     private var to = color
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private var phase = 0f
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG)
+    private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1f
+    }
+
     private val anim = ValueAnimator.ofFloat(0f, 1f).apply {
-        duration = 800
+        duration = 650
         addUpdateListener {
             color = ArgbEvaluator().evaluate(it.animatedValue as Float, from, to) as Int
             invalidate()
         }
+    }
+
+    private val pulseAnim = ValueAnimator.ofFloat(0f, (Math.PI * 2).toFloat()).apply {
+        duration = 14000
+        repeatCount = ValueAnimator.INFINITE
+        repeatMode = ValueAnimator.RESTART
+        addUpdateListener {
+            phase = it.animatedValue as Float
+            invalidate()
+        }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (!pulseAnim.isStarted) pulseAnim.start()
+    }
+
+    override fun onDetachedFromWindow() {
+        pulseAnim.cancel()
+        anim.cancel()
+        super.onDetachedFromWindow()
     }
 
     fun glow(target: Int) {
@@ -61,18 +90,95 @@ class AmbientView(c: Context) : View(c) {
     override fun onDraw(cv: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
+        if (w <= 0f || h <= 0f) return
+
         val r = Color.red(color)
         val g = Color.green(color)
         val b = Color.blue(color)
-        
-        paint.shader = LinearGradient(0f, 0f, w, h, intArrayOf(0xFF020408.toInt(), 0xFF080D1A.toInt(), 0xFF0F0B1E.toInt()), null, Shader.TileMode.CLAMP)
+
+        // توليد لون ثانوي متناغم لإعطاء عمق سينمائي 4K غير سادة
+        val hsv = FloatArray(3)
+        Color.colorToHSV(color, hsv)
+        hsv[0] = (hsv[0] + 42f) % 360f
+        hsv[1] = (hsv[1] * 0.85f).coerceIn(0.35f, 1f)
+        hsv[2] = (hsv[2] * 0.95f).coerceIn(0.45f, 1f)
+        val secColor = Color.HSVToColor(hsv)
+        val sr = Color.red(secColor)
+        val sg = Color.green(secColor)
+        val sb = Color.blue(secColor)
+
+        val dx = Math.sin(phase.toDouble()).toFloat() * w * 0.04f
+        val dy = Math.cos(phase.toDouble()).toFloat() * h * 0.04f
+
+        // 1. طبقة الأساس 4K العميقة
+        paint.shader = LinearGradient(
+            0f, 0f, w, h,
+            intArrayOf(0xFF03050B.toInt(), 0xFF080E20.toInt(), 0xFF0B0719.toInt(), 0xFF04060D.toInt()),
+            floatArrayOf(0f, 0.38f, 0.72f, 1f),
+            Shader.TileMode.CLAMP
+        )
         cv.drawRect(0f, 0f, w, h, paint)
-        
-        paint.shader = RadialGradient(w * 0.75f, h * 0.2f, w * 0.7f, Color.argb(150, r, g, b), Color.TRANSPARENT, Shader.TileMode.CLAMP)
+
+        // 2. هالة Aurora رئيسية متحركة بنعومة في الأعلى واليمين
+        paint.shader = RadialGradient(
+            w * 0.82f + dx, h * 0.18f + dy, w * 0.62f,
+            intArrayOf(Color.argb(145, r, g, b), Color.argb(55, r, g, b), Color.TRANSPARENT),
+            floatArrayOf(0f, 0.55f, 1f),
+            Shader.TileMode.CLAMP
+        )
         cv.drawRect(0f, 0f, w, h, paint)
-        
-        paint.shader = RadialGradient(w * 0.15f, h * 0.9f, w * 0.6f, Color.argb(95, r, g, b), Color.TRANSPARENT, Shader.TileMode.CLAMP)
+
+        // 3. هالة سفلية بلون التطبيق مع اللون المكمّل (أسفل منطقة الدوك)
+        paint.shader = RadialGradient(
+            w * 0.22f - dx, h * 0.88f - dy, w * 0.58f,
+            intArrayOf(Color.argb(115, sr, sg, sb), Color.argb(45, r, g, b), Color.TRANSPARENT),
+            floatArrayOf(0f, 0.5f, 1f),
+            Shader.TileMode.CLAMP
+        )
         cv.drawRect(0f, 0f, w, h, paint)
+
+        // 4. إضاءة وسطية ناعمة لربط الطبقات
+        paint.shader = RadialGradient(
+            w * 0.5f - dy, h * 0.48f + dx * 0.5f, w * 0.45f,
+            intArrayOf(Color.argb(50, r, g, b), Color.TRANSPARENT),
+            null,
+            Shader.TileMode.CLAMP
+        )
+        cv.drawRect(0f, 0f, w, h, paint)
+
+        // 5. انعكاس زجاجي قطري حاد يعطي فخامة شاشات الـ 4K
+        paint.shader = LinearGradient(
+            0f, h * 0.1f, w, h * 0.75f,
+            intArrayOf(Color.TRANSPARENT, Color.argb(18, 255, 255, 255), Color.argb(28, r, g, b), Color.TRANSPARENT),
+            floatArrayOf(0f, 0.45f, 0.55f, 1f),
+            Shader.TileMode.CLAMP
+        )
+        cv.drawRect(0f, 0f, w, h, paint)
+
+        // 6. كرات إضاءة محيطية ناعمة (4K Bokeh Orbs)
+        val orbs = arrayOf(
+            floatArrayOf(0.14f, 0.22f, 0.09f, 26f),
+            floatArrayOf(0.64f, 0.14f, 0.06f, 22f),
+            floatArrayOf(0.88f, 0.62f, 0.11f, 24f),
+            floatArrayOf(0.38f, 0.76f, 0.08f, 20f),
+            floatArrayOf(0.74f, 0.84f, 0.05f, 28f)
+        )
+        for (i in orbs.indices) {
+            val o = orbs[i]
+            val ox = w * o[0] + (if (i % 2 == 0) dx else -dx) * 0.6f
+            val oy = h * o[1] + (if (i % 2 == 0) dy else -dy) * 0.6f
+            val orad = w * o[2]
+            val alpha = o[3].toInt()
+            val cOrb = if (i % 2 == 0) Color.argb(alpha, r, g, b) else Color.argb(alpha, sr, sg, sb)
+            paint.shader = RadialGradient(ox, oy, orad, cOrb, Color.TRANSPARENT, Shader.TileMode.CLAMP)
+            cv.drawCircle(ox, oy, orad, paint)
+        }
+
+        // 7. أقواس هندسية خفيفة جداً في الخلفية لعمق بصري احترافي
+        gridPaint.color = Color.argb(16, 255, 255, 255)
+        cv.drawCircle(w * 0.85f, h * 0.15f, w * 0.28f, gridPaint)
+        gridPaint.color = Color.argb(12, r, g, b)
+        cv.drawCircle(w * 0.85f, h * 0.15f, w * 0.38f, gridPaint)
     }
 }
 
@@ -82,7 +188,7 @@ class MainActivity : Activity() {
     private lateinit var prefs: SharedPreferences
     private val accent = Color.parseColor("#4DEEEA")
     private val gold = Color.parseColor("#FFEAA7")
-    private val dim = Color.argb(210, 255, 255, 255)
+    private val dim = Color.argb(200, 255, 255, 255)
     private val homeGlow = 0xFF3B2A6B.toInt()
 
     private lateinit var ambient: AmbientView
@@ -143,17 +249,24 @@ class MainActivity : Activity() {
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     private fun city(): City = Data.cities[prefs.getInt("city_idx", 0).coerceIn(0, Data.cities.size - 1)]
 
-    private fun glass(alpha: Int = 140, radius: Int = 22, strokeColor: Int = Color.argb(110, 255, 255, 255), strokeDp: Int = 1): Drawable {
+    // دالة لمنع قص الأيقونات والكروت عند التكبير في جميع الحاويات
+    private fun <T : ViewGroup> T.unclip(): T {
+        clipChildren = false
+        clipToPadding = false
+        return this
+    }
+
+    private fun glass(alpha: Int = 140, radius: Int = 20, strokeColor: Int = Color.argb(100, 255, 255, 255), strokeDp: Int = 1): Drawable {
         val r = dp(radius).toFloat()
         val base = GradientDrawable().apply {
-            setColor(Color.argb((alpha * 0.45f).toInt().coerceAtMost(120), 10, 15, 32))
+            setColor(Color.argb((alpha * 0.4f).toInt().coerceAtMost(110), 8, 12, 26))
             cornerRadius = r
         }
         val shine = GradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
             intArrayOf(
-                Color.argb((alpha * 0.48f).toInt().coerceAtMost(255), 255, 255, 255),
-                Color.argb((alpha * 0.15f).toInt().coerceAtMost(255), 255, 255, 255)
+                Color.argb((alpha * 0.42f).toInt().coerceAtMost(255), 255, 255, 255),
+                Color.argb((alpha * 0.14f).toInt().coerceAtMost(255), 255, 255, 255)
             )
         ).apply {
             cornerRadius = r
@@ -162,7 +275,7 @@ class MainActivity : Activity() {
         return LayerDrawable(arrayOf(base, shine))
     }
 
-    private fun solidCard(color: Int, radius: Int = 18, strokeColor: Int = Color.TRANSPARENT, strokeDp: Int = 0) = GradientDrawable().apply {
+    private fun solidCard(color: Int, radius: Int = 16, strokeColor: Int = Color.TRANSPARENT, strokeDp: Int = 0) = GradientDrawable().apply {
         setColor(color)
         cornerRadius = dp(radius).toFloat()
         if (strokeDp > 0) setStroke(dp(strokeDp), strokeColor)
@@ -177,6 +290,19 @@ class MainActivity : Activity() {
     private fun go(i: Intent) {
         try { startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
         catch (e: Throwable) { Toast.makeText(this, "غير متاح على هذا الجهاز", Toast.LENGTH_SHORT).show() }
+    }
+
+    // تعطيل زر TV المزعج في ريموت شاومي
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_TV,
+            KeyEvent.KEYCODE_TV_INPUT,
+            KeyEvent.KEYCODE_GUIDE,
+            KeyEvent.KEYCODE_TV_DATA_SERVICE,
+            KeyEvent.KEYCODE_TV_CONTENTS_MENU,
+            KeyEvent.KEYCODE_DVR -> return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -231,22 +357,22 @@ class MainActivity : Activity() {
     }
 
     private fun buildInterface() {
-        val frame = FrameLayout(this).apply { setBackgroundColor(0xFF020408.toInt()) }
+        val frame = FrameLayout(this).unclip().apply { setBackgroundColor(0xFF03050B.toInt()) }
         ambient = AmbientView(this)
         frame.addView(ambient, FrameLayout.LayoutParams(-1, -1))
         backgroundImageView = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP; visibility = View.GONE }
         frame.addView(backgroundImageView, FrameLayout.LayoutParams(-1, -1))
-        overlay = View(this).apply { setBackgroundColor(0x99050812.toInt()); visibility = View.GONE }
+        overlay = View(this).apply { setBackgroundColor(0x99080C14.toInt()); visibility = View.GONE }
         frame.addView(overlay, FrameLayout.LayoutParams(-1, -1))
         applyCustomBackground()
 
-        val root = LinearLayout(this).apply {
+        val root = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
-            setPadding(dp(36), dp(18), dp(36), dp(12))
+            setPadding(dp(32), dp(16), dp(32), dp(10))
         }
         root.addView(buildHeader(), LinearLayout.LayoutParams(-1, -2))
-        val box = FrameLayout(this)
+        val box = FrameLayout(this).unclip()
         pages = listOf(buildHomePage(), buildMatchesPage(), buildAppsPage())
         pages.forEach { box.addView(it, FrameLayout.LayoutParams(-1, -1)) }
         root.addView(box, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -270,41 +396,39 @@ class MainActivity : Activity() {
     }
 
     private fun buildHeader(): View {
-        val h = LinearLayout(this).apply {
+        val h = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            clipChildren = false
-            clipToPadding = false
-            setPadding(0, dp(4), 0, dp(8))
+            setPadding(0, dp(4), 0, dp(6))
         }
         val names = listOf("الرئيسية", "المباريات", "التطبيقات")
         tabViews = names.mapIndexed { i, n ->
-            val t = tv(16.5f, true).apply {
+            val t = tv(16f, true).apply {
                 text = n
                 gravity = Gravity.CENTER
-                setPadding(dp(24), dp(10), dp(24), dp(10))
+                setPadding(dp(22), dp(9), dp(22), dp(9))
                 isFocusable = true
                 isClickable = true
-                background = glass(0, 24, Color.TRANSPARENT, 0)
+                background = glass(0, 22, Color.TRANSPARENT, 0)
                 setOnClickListener { showPage(i) }
                 setOnFocusChangeListener { v, f ->
-                    v.background = glass(if (f) 220 else 0, 24, if (f) Color.WHITE else Color.TRANSPARENT, if (f) 2 else 0)
-                    v.animate().scaleX(if (f) 1.06f else 1f).scaleY(if (f) 1.06f else 1f).setDuration(120).start()
+                    v.background = glass(if (f) 200 else 0, 22, if (f) Color.WHITE else Color.TRANSPARENT, if (f) 2 else 0)
+                    v.animate().scaleX(if (f) 1.08f else 1f).scaleY(if (f) 1.08f else 1f).setDuration(120).start()
                 }
             }
-            h.addView(t, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
+            h.addView(t, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) })
             t
         }
-        tickerTv = tv(13f, false, dim).apply {
+        tickerTv = tv(12.5f, false, dim).apply {
             setSingleLine(true)
             ellipsize = TextUtils.TruncateAt.MARQUEE
             marqueeRepeatLimit = -1
             isSelected = true
             gravity = Gravity.CENTER
-            setPadding(dp(20), 0, dp(20), 0)
+            setPadding(dp(18), 0, dp(18), 0)
         }
         h.addView(tickerTv, LinearLayout.LayoutParams(0, -2, 1f))
-        miniClockTv = tv(14.5f, true, dim).apply { setPadding(dp(12), 0, dp(8), 0) }
+        miniClockTv = tv(14f, true, dim).apply { setPadding(dp(10), 0, dp(6), 0) }
         h.addView(miniClockTv)
         h.addView(capsule("المدينة", 3) { openCityPicker() })
         h.addView(capsule("واي فاي", 0) { go(Intent(Settings.ACTION_WIFI_SETTINGS)) })
@@ -313,39 +437,39 @@ class MainActivity : Activity() {
     }
 
     private fun buildHomePage(): View {
-        val col = LinearLayout(this).apply {
+        val col = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(10), dp(14), dp(24))
+            setPadding(dp(14), dp(8), dp(14), dp(20))
         }
-        val top = LinearLayout(this).apply {
+        val top = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val ww = dp(230)
-        val wh = dp(145)
+        val ww = dp(225)
+        val wh = dp(140)
 
         val wCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = glass(160, 24)
-            setPadding(dp(18), dp(12), dp(18), dp(12))
+            background = glass(150, 22)
+            setPadding(dp(16), dp(10), dp(16), dp(10))
             val head = LinearLayout(context).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                addView(tv(13.5f, true, dim).apply { text = "الطقس" })
+                addView(tv(13f, true, dim).apply { text = "الطقس" })
                 addView(View(context), LinearLayout.LayoutParams(0, 0, 1f))
-                cityTv = tv(12.5f, true, accent).apply { text = city().name + " ▾" }
+                cityTv = tv(12f, true, accent).apply { text = city().name + " ▾" }
                 addView(cityTv)
             }
             addView(head)
             val tempRow = LinearLayout(context).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, dp(4), 0, dp(4))
+                setPadding(0, dp(2), 0, dp(2))
             }
-            tempRow.addView(sunView(), LinearLayout.LayoutParams(dp(34), dp(34)))
-            tempTv = tv(36f, true).apply { text = "--°"; setPadding(dp(10), 0, 0, 0) }
+            tempRow.addView(sunView(), LinearLayout.LayoutParams(dp(32), dp(32)))
+            tempTv = tv(34f, true).apply { text = "--°"; setPadding(dp(10), 0, 0, 0) }
             tempRow.addView(tempTv)
             addView(tempRow)
-            weatherStatusTv = tv(12.5f, true).apply { text = "جاري التحديث..." }
-            weatherSubTv = tv(11f, false, dim).apply { text = ""; setLineSpacing(0f, 1.1f) }
+            weatherStatusTv = tv(12f, true).apply { text = "جاري التحديث..." }
+            weatherSubTv = tv(10.5f, false, dim).apply { text = ""; setLineSpacing(0f, 1.1f) }
             addView(weatherStatusTv)
             addView(weatherSubTv)
         }
@@ -353,89 +477,106 @@ class MainActivity : Activity() {
 
         val pCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = glass(160, 24)
-            setPadding(dp(18), dp(10), dp(18), dp(10))
-            addView(tv(13.5f, true, dim).apply { text = "أوقات الصلاة"; gravity = Gravity.CENTER })
+            background = glass(150, 22)
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+            addView(tv(13f, true, dim).apply { text = "أوقات الصلاة"; gravity = Gravity.CENTER })
             prayerLayout = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(0, dp(4), 0, dp(3))
+                setPadding(0, dp(3), 0, dp(2))
             }
             addView(prayerLayout, LinearLayout.LayoutParams(-1, 0, 1f))
-            prayerTimerTv = tv(11.5f, true, gold).apply { text = "جاري تحديث المواقيت..."; gravity = Gravity.CENTER }
+            prayerTimerTv = tv(11f, true, gold).apply { text = "جاري تحديث المواقيت..."; gravity = Gravity.CENTER }
             addView(prayerTimerTv)
         }
-        top.addView(pCard, LinearLayout.LayoutParams(ww, wh).apply { marginStart = dp(16) })
+        top.addView(pCard, LinearLayout.LayoutParams(ww, wh).apply { marginStart = dp(14) })
         top.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
 
-        val clockBox = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.START
-            background = glass(180, 26)
-            setPadding(dp(24), dp(16), dp(24), dp(16))
+        // تصميم الساعة العائم الأنيق مع خط فاصل عمودي مضيء بدون إطار مربع مكرر
+        val clockRow = LinearLayout(this).unclip().apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
-        clockTv = tv(54f, true, Color.WHITE).apply { gravity = Gravity.START }
-        dayTv = tv(16f, true, accent).apply { gravity = Gravity.START; setPadding(0, dp(2), 0, dp(2)) }
-        datesTv = tv(12f, false, dim).apply { gravity = Gravity.START; setLineSpacing(0f, 1.2f) }
-        
-        clockBox.addView(clockTv)
-        clockBox.addView(dayTv)
-        clockBox.addView(datesTv)
-        top.addView(clockBox, LinearLayout.LayoutParams(-2, wh))
-        
+        val dateCol = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.END
+            setPadding(dp(14), 0, dp(14), 0)
+        }
+        dayTv = tv(18f, true, accent).apply { gravity = Gravity.END }
+        datesTv = tv(12.5f, false, dim).apply { gravity = Gravity.END; setLineSpacing(0f, 1.2f) }
+        dateCol.addView(dayTv)
+        dateCol.addView(datesTv)
+
+        val divider = View(this).apply {
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(Color.TRANSPARENT, accent, Color.TRANSPARENT)
+            )
+        }
+        clockTv = tv(58f, true, Color.WHITE).apply {
+            gravity = Gravity.END
+            setShadowLayer(18f, 0f, 4f, Color.argb(120, 0, 0, 0))
+        }
+        clockRow.addView(clockTv)
+        clockRow.addView(divider, LinearLayout.LayoutParams(dp(2), dp(72)).apply { marginStart = dp(14); marginEnd = dp(4) })
+        clockRow.addView(dateCol)
+        top.addView(clockRow)
         col.addView(top, LinearLayout.LayoutParams(-1, -2))
 
-        col.addView(tv(14f, true, dim).apply { text = "مباريات اليوم"; setPadding(dp(6), dp(16), 0, dp(4)) })
-        homeMatchRow = LinearLayout(this).apply {
+        col.addView(tv(13f, true, dim).apply { text = "مباريات اليوم"; setPadding(dp(6), dp(12), 0, dp(2)) })
+        homeMatchRow = LinearLayout(this).unclip().apply {
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10), dp(8), dp(10), dp(8))
+            setPadding(dp(14), dp(12), dp(14), dp(12))
         }
-        col.addView(HorizontalScrollView(this).apply {
+        col.addView(HorizontalScrollView(this).unclip().apply {
             isHorizontalScrollBarEnabled = false
             addView(homeMatchRow)
         }, LinearLayout.LayoutParams(-1, -2))
 
-        col.addView(tv(14f, true, dim).apply { text = "المفضلة"; setPadding(dp(6), dp(10), 0, dp(8)) })
-        val dock = LinearLayout(this).apply {
+        col.addView(tv(13f, true, dim).apply { text = "المفضلة"; setPadding(dp(6), dp(6), 0, dp(6)) })
+        val dock = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.VERTICAL
-            background = glass(130, 30)
+            background = glass(120, 28)
+            setPadding(dp(14), dp(12), dp(14), dp(10))
+        }
+        favRow = LinearLayout(this).unclip().apply {
+            gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(16), dp(12), dp(16), dp(8))
         }
-        favRow = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(10), dp(16), dp(6))
-        }
-        dock.addView(HorizontalScrollView(this).apply {
+        dock.addView(HorizontalScrollView(this).unclip().apply {
             isHorizontalScrollBarEnabled = false
             addView(favRow)
         }, LinearLayout.LayoutParams(-1, -2))
         col.addView(dock, LinearLayout.LayoutParams(-1, -2))
 
-        return ScrollView(this).apply {
+        return ScrollView(this).unclip().apply {
             isVerticalScrollBarEnabled = false
             addView(col)
         }
     }
 
     private fun buildMatchesPage(): View {
-        val col = LinearLayout(this).apply {
+        val col = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(10), dp(14), dp(24))
+            setPadding(dp(14), dp(8), dp(14), dp(24))
         }
-        col.addView(tv(22f, true).apply { text = "كل مباريات اليوم"; setPadding(dp(6), dp(6), 0, dp(12)) })
-        matchesGrid = GridLayout(this).apply { columnCount = 3 }
+        col.addView(tv(20f, true).apply { text = "كل مباريات اليوم"; setPadding(dp(6), dp(6), 0, dp(8)) })
+        matchesGrid = GridLayout(this).unclip().apply {
+            columnCount = 3
+            setPadding(dp(8), dp(8), dp(8), dp(16))
+        }
         col.addView(matchesGrid, LinearLayout.LayoutParams(-1, -2))
-        return ScrollView(this).apply {
+        return ScrollView(this).unclip().apply {
             isVerticalScrollBarEnabled = false
             addView(col)
         }
     }
 
     private fun buildAppsPage(): View {
-        allGrid = GridLayout(this).apply {
+        allGrid = GridLayout(this).unclip().apply {
             columnCount = 6
-            setPadding(dp(16), dp(16), dp(16), dp(32))
+            setPadding(dp(20), dp(18), dp(20), dp(36))
         }
-        return ScrollView(this).apply {
+        return ScrollView(this).unclip().apply {
             isVerticalScrollBarEnabled = false
             addView(allGrid)
         }
@@ -488,25 +629,24 @@ class MainActivity : Activity() {
     }
 
     private fun capsule(label: String, kind: Int, onClick: () -> Unit): View {
-        val box = LinearLayout(this).apply {
+        val box = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            background = glass(150, 26)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = glass(140, 24)
+            setPadding(dp(11), dp(9), dp(11), dp(9))
             isFocusable = true
             isClickable = true
-            clipChildren = false
             setOnClickListener { onClick() }
         }
-        val title = tv(13f, true).apply { text = label; visibility = View.GONE; setPadding(dp(8), 0, dp(4), 0) }
+        val title = tv(12.5f, true).apply { text = label; visibility = View.GONE; setPadding(dp(8), 0, dp(4), 0) }
         box.addView(GlyphView(this, kind), LinearLayout.LayoutParams(dp(26), dp(26)))
         box.addView(title)
         box.setOnFocusChangeListener { v, f ->
             title.visibility = if (f) View.VISIBLE else View.GONE
-            v.background = glass(if (f) 240 else 150, 26, if (f) Color.WHITE else Color.argb(110, 255, 255, 255), if (f) 2 else 1)
+            v.background = glass(if (f) 230 else 140, 24, if (f) Color.WHITE else Color.argb(100, 255, 255, 255), if (f) 2 else 1)
             v.animate().scaleX(if (f) 1.08f else 1f).scaleY(if (f) 1.08f else 1f).setDuration(120).start()
         }
-        box.layoutParams = LinearLayout.LayoutParams(-2, dp(46)).apply { marginStart = dp(8) }
+        box.layoutParams = LinearLayout.LayoutParams(-2, dp(44)).apply { marginStart = dp(8) }
         return box
     }
 
@@ -535,47 +675,47 @@ class MainActivity : Activity() {
         val d = Dialog(this)
         d.requestWindowFeature(Window.FEATURE_NO_TITLE)
         d.window?.setBackgroundDrawableResource(android.R.color.transparent)
-        val s = LinearLayout(this).apply {
+        val s = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
-            background = solidCard(0xF00D1528.toInt(), 30, Color.argb(100, 255, 255, 255), 1)
-            setPadding(dp(30), dp(24), dp(30), dp(24))
+            background = solidCard(0xF0101A2E.toInt(), 28, Color.argb(90, 255, 255, 255), 1)
+            setPadding(dp(28), dp(22), dp(28), dp(22))
         }
         return d to s
     }
 
-    private fun optionRow(label: String, onClick: () -> Unit): View = tv(15.5f, true).apply {
+    private fun optionRow(label: String, onClick: () -> Unit): View = tv(15f, true).apply {
         text = label
-        setPadding(dp(20), dp(14), dp(20), dp(14))
-        background = glass(110, 16, Color.TRANSPARENT, 0)
+        setPadding(dp(18), dp(12), dp(18), dp(12))
+        background = glass(100, 14, Color.TRANSPARENT, 0)
         isFocusable = true
         isClickable = true
         setOnClickListener { onClick() }
-        setOnFocusChangeListener { v, f -> v.background = glass(if (f) 220 else 110, 16, if (f) Color.WHITE else Color.TRANSPARENT, if (f) 2 else 0) }
+        setOnFocusChangeListener { v, f -> v.background = glass(if (f) 200 else 100, 14, if (f) Color.WHITE else Color.TRANSPARENT, if (f) 2 else 0) }
     }
 
     private fun openSettingsDialog() {
         val (dialog, sheet) = shell()
-        sheet.addView(tv(22f, true).apply { text = "الإعدادات" })
-        sheet.addView(tv(12.5f, false, dim).apply { text = "تحكم بواجهتك"; setPadding(0, dp(2), 0, dp(14)) })
-        val g = GridLayout(this).apply { columnCount = 2 }
+        sheet.addView(tv(21f, true).apply { text = "الإعدادات" })
+        sheet.addView(tv(12f, false, dim).apply { text = "تحكم بواجهتك"; setPadding(0, dp(2), 0, dp(14)) })
+        val g = GridLayout(this).unclip().apply { columnCount = 2 }
         fun card(icon: String, title: String, sub: String, act: () -> Unit) {
             val c = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                background = glass(130, 20)
-                setPadding(dp(20), dp(16), dp(20), dp(16))
+                background = glass(120, 18)
+                setPadding(dp(18), dp(14), dp(18), dp(14))
                 isFocusable = true
                 isClickable = true
                 setOnClickListener { dialog.dismiss(); act() }
                 setOnFocusChangeListener { v, f ->
-                    v.background = glass(if (f) 220 else 130, 20, if (f) Color.WHITE else Color.argb(110, 255, 255, 255), if (f) 2 else 1)
+                    v.background = glass(if (f) 210 else 120, 18, if (f) Color.WHITE else Color.argb(100, 255, 255, 255), if (f) 2 else 1)
                     v.animate().scaleX(if (f) 1.04f else 1f).scaleY(if (f) 1.04f else 1f).setDuration(110).start()
                 }
                 addView(tv(24f).apply { text = icon })
-                addView(tv(15f, true).apply { text = title; setPadding(0, dp(6), 0, 0) })
-                addView(tv(11.5f, false, dim).apply { text = sub })
+                addView(tv(14.5f, true).apply { text = title; setPadding(0, dp(6), 0, 0) })
+                addView(tv(11f, false, dim).apply { text = sub })
             }
-            g.addView(c, GridLayout.LayoutParams().apply { width = dp(220); height = -2; setMargins(dp(6), dp(6), dp(6), dp(6)) })
+            g.addView(c, GridLayout.LayoutParams().apply { width = dp(210); height = -2; setMargins(dp(6), dp(6), dp(6), dp(6)) })
         }
         card("📍", "المدينة", city().name) { openCityPicker() }
         card("📶", "الواي فاي", "الشبكة والاتصال") { go(Intent(Settings.ACTION_WIFI_SETTINGS)) }
@@ -590,15 +730,15 @@ class MainActivity : Activity() {
             prefs.edit().remove("fav_apps").apply()
             loadAppsAndDock()
         }
-        sheet.addView(ScrollView(this).apply { isVerticalScrollBarEnabled = false; addView(g) }, LinearLayout.LayoutParams(dp(490), dp(340)))
+        sheet.addView(ScrollView(this).unclip().apply { isVerticalScrollBarEnabled = false; addView(g) }, LinearLayout.LayoutParams(dp(470), dp(320)))
         dialog.setContentView(sheet)
         dialog.show()
     }
 
     private fun openCityPicker() {
         val (dialog, sheet) = shell()
-        sheet.addView(tv(20f, true, accent).apply { text = "اختر مدينتك (الطقس والصلاة)"; setPadding(0, 0, 0, dp(14)) })
-        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; clipChildren = false }
+        sheet.addView(tv(19f, true, accent).apply { text = "اختر مدينتك (الطقس والصلاة)"; setPadding(0, 0, 0, dp(12)) })
+        val list = LinearLayout(this).unclip().apply { orientation = LinearLayout.VERTICAL }
         val cur = prefs.getInt("city_idx", 0)
         Data.cities.forEachIndexed { i, c ->
             list.addView(optionRow((if (i == cur) "✓  " else "") + c.name) {
@@ -606,9 +746,9 @@ class MainActivity : Activity() {
                 cityTv.text = c.name + " ▾"
                 dialog.dismiss()
                 refreshFeeds()
-            }, LinearLayout.LayoutParams(dp(360), -2).apply { bottomMargin = dp(8) })
+            }, LinearLayout.LayoutParams(dp(340), -2).apply { bottomMargin = dp(8) })
         }
-        sheet.addView(ScrollView(this).apply { isVerticalScrollBarEnabled = false; addView(list) }, LinearLayout.LayoutParams(dp(360), dp(300)))
+        sheet.addView(ScrollView(this).unclip().apply { isVerticalScrollBarEnabled = false; addView(list) }, LinearLayout.LayoutParams(dp(340), dp(300)))
         dialog.setContentView(sheet)
         dialog.show()
     }
@@ -656,14 +796,14 @@ class MainActivity : Activity() {
             matchesGrid.addView(tv(15f, false, dim).apply { text = msg; setPadding(dp(8), dp(14), dp(8), dp(14)) })
             return
         }
-        val cw = (resources.displayMetrics.widthPixels - dp(72) - dp(32) - dp(20)) / 4 - dp(10)
-        for (m in list) homeMatchRow.addView(miniMatch(m), LinearLayout.LayoutParams(cw, -2).apply { marginEnd = dp(10) })
-        val w = (resources.displayMetrics.widthPixels - dp(72) - dp(32) - 3 * dp(16)) / 3
+        val cw = (resources.displayMetrics.widthPixels - dp(64) - dp(28) - dp(28)) / 4 - dp(12)
+        for (m in list) homeMatchRow.addView(miniMatch(m), LinearLayout.LayoutParams(cw, -2).apply { marginEnd = dp(12) })
+        val w = (resources.displayMetrics.widthPixels - dp(64) - dp(28) - dp(16) - 3 * dp(18)) / 3
         for (m in list) {
             matchesGrid.addView(matchCard(m), GridLayout.LayoutParams().apply {
                 width = w
                 height = -2
-                setMargins(dp(8), dp(8), dp(8), dp(8))
+                setMargins(dp(9), dp(9), dp(9), dp(9))
             })
         }
     }
@@ -675,29 +815,36 @@ class MainActivity : Activity() {
     }
 
     private fun miniMatch(m: Match): View {
-        val card = LinearLayout(this).apply {
+        val card = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.VERTICAL
-            background = glass(160, 22)
-            setPadding(dp(14), dp(10), dp(14), dp(10))
+            background = glass(150, 20)
+            setPadding(dp(12), dp(8), dp(12), dp(8))
             isFocusable = true
             isClickable = true
             setOnFocusChangeListener { v, f ->
-                v.background = glass(if (f) 230 else 160, 22, if (f) Color.WHITE else Color.argb(110, 255, 255, 255), if (f) 2 else 1)
-                v.animate().scaleX(if (f) 1.06f else 1f).scaleY(if (f) 1.06f else 1f).setDuration(120).start()
+                v.background = glass(if (f) 235 else 150, 20, if (f) Color.WHITE else Color.argb(100, 255, 255, 255), if (f) 2 else 1)
+                v.translationZ = if (f) dp(12).toFloat() else 0f
+                v.elevation = if (f) 24f else 4f
+                v.animate()
+                    .scaleX(if (f) 1.07f else 1f)
+                    .scaleY(if (f) 1.07f else 1f)
+                    .translationY(if (f) -dp(3).toFloat() else 0f)
+                    .setDuration(140)
+                    .start()
             }
         }
         val head = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        head.addView(tv(11f, true, accent).apply { text = m.league; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
-        val st = tv(10.5f, false, dim).apply { text = statusText(m); maxLines = 1 }
+        head.addView(tv(10f, true, accent).apply { text = m.league; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+        val st = tv(10f, false, dim).apply { text = statusText(m); maxLines = 1 }
         statusViews.add(st to m)
         head.addView(st)
         card.addView(head, LinearLayout.LayoutParams(-1, -2))
         val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(6), 0, dp(4)) }
-        row.addView(miniLogo(m.home, m.homeLogo), LinearLayout.LayoutParams(dp(32), dp(32)))
+        row.addView(miniLogo(m.home, m.homeLogo), LinearLayout.LayoutParams(dp(30), dp(30)))
         row.addView(tv(15f, true, gold).apply { text = m.center; gravity = Gravity.CENTER; maxLines = 1 }, LinearLayout.LayoutParams(0, -2, 1f))
-        row.addView(miniLogo(m.away, m.awayLogo), LinearLayout.LayoutParams(dp(32), dp(32)))
+        row.addView(miniLogo(m.away, m.awayLogo), LinearLayout.LayoutParams(dp(30), dp(30)))
         card.addView(row, LinearLayout.LayoutParams(-1, -2))
-        card.addView(tv(11.5f, true).apply {
+        card.addView(tv(11f, true).apply {
             text = "${m.home} × ${m.away}"
             maxLines = 1
             gravity = Gravity.CENTER
@@ -707,28 +854,35 @@ class MainActivity : Activity() {
     }
 
     private fun matchCard(m: Match): View {
-        val card = LinearLayout(this).apply {
+        val card = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            background = glass(160, 24)
-            setPadding(dp(18), dp(14), dp(18), dp(14))
+            background = glass(150, 22)
+            setPadding(dp(16), dp(12), dp(16), dp(12))
             isFocusable = true
             isClickable = true
             setOnFocusChangeListener { v, f ->
-                v.background = glass(if (f) 230 else 160, 24, if (f) Color.WHITE else Color.argb(110, 255, 255, 255), if (f) 2 else 1)
-                v.animate().scaleX(if (f) 1.05f else 1f).scaleY(if (f) 1.05f else 1f).setDuration(120).start()
+                v.background = glass(if (f) 235 else 150, 22, if (f) Color.WHITE else Color.argb(100, 255, 255, 255), if (f) 2 else 1)
+                v.translationZ = if (f) dp(12).toFloat() else 0f
+                v.elevation = if (f) 24f else 4f
+                v.animate()
+                    .scaleX(if (f) 1.06f else 1f)
+                    .scaleY(if (f) 1.06f else 1f)
+                    .translationY(if (f) -dp(3).toFloat() else 0f)
+                    .setDuration(140)
+                    .start()
             }
         }
         val head = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        head.addView(tv(11.5f, true, accent).apply { text = m.league; maxLines = 1 })
+        head.addView(tv(11f, true, accent).apply { text = m.league; maxLines = 1 })
         head.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
-        val st = tv(11f, false, dim).apply { text = statusText(m) }
+        val st = tv(10.5f, false, dim).apply { text = statusText(m) }
         statusViews.add(st to m)
         head.addView(st)
         card.addView(head, LinearLayout.LayoutParams(-1, -2))
-        val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(10), 0, dp(4)) }
+        val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(8), 0, dp(4)) }
         row.addView(clubColumn(m.home, m.homeLogo), LinearLayout.LayoutParams(0, -2, 1f))
-        row.addView(tv(19f, true, gold).apply { text = m.center; gravity = Gravity.CENTER; setPadding(dp(8), 0, dp(8), 0) })
+        row.addView(tv(18f, true, gold).apply { text = m.center; gravity = Gravity.CENTER; setPadding(dp(8), 0, dp(8), 0) })
         row.addView(clubColumn(m.away, m.awayLogo), LinearLayout.LayoutParams(0, -2, 1f))
         card.addView(row, LinearLayout.LayoutParams(-1, -2))
         return card
@@ -736,13 +890,13 @@ class MainActivity : Activity() {
 
     private fun clubColumn(name: String, logoUrl: String): LinearLayout {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
-        col.addView(miniLogo(name, logoUrl), LinearLayout.LayoutParams(dp(44), dp(44)))
-        col.addView(tv(12.5f, true).apply { text = name; maxLines = 2; gravity = Gravity.CENTER; setPadding(0, dp(6), 0, 0) })
+        col.addView(miniLogo(name, logoUrl), LinearLayout.LayoutParams(dp(40), dp(40)))
+        col.addView(tv(12f, true).apply { text = name; maxLines = 2; gravity = Gravity.CENTER; setPadding(0, dp(4), 0, 0) })
         return col
     }
 
     private fun crest(name: String): Drawable {
-        val size = dp(44)
+        val size = dp(40)
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         val clubColor = when {
@@ -795,16 +949,16 @@ class MainActivity : Activity() {
 
         favRow.removeAllViews()
         val favList = if (favPkgs.isNotEmpty()) favPkgs.mapNotNull { pkg -> allApps.find { it.activityInfo.packageName == pkg } } else allApps.take(6)
-        val fw = (sw - dp(72) - dp(32) - dp(36) - 6 * dp(14)) / 6
+        val fw = (sw - dp(64) - dp(28) - dp(32) - 6 * dp(14)) / 6
         for (a in favList) favRow.addView(createCell(a, fw), LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(14) })
 
         allGrid.removeAllViews()
-        val gw = (sw - dp(72) - dp(32) - 6 * dp(16)) / 6
+        val gw = (sw - dp(64) - dp(40) - 6 * dp(18)) / 6
         for (a in allApps) {
             allGrid.addView(createCell(a, gw), GridLayout.LayoutParams().apply {
                 width = -2
                 height = -2
-                setMargins(dp(8), dp(8), dp(8), dp(8))
+                setMargins(dp(9), dp(9), dp(9), dp(9))
             })
         }
         if (currentPage == 0) ((favRow.getChildAt(0) as? LinearLayout)?.getChildAt(0))?.requestFocus()
@@ -859,17 +1013,35 @@ class MainActivity : Activity() {
         val glowC = dominant(banner ?: icon)
         val th = (w * 0.52f).toInt()
 
-        val tile = FrameLayout(this).apply {
-            background = solidCard(bg, 20, Color.argb(80, 255, 255, 255), 1)
+        // الخلية الأب بدون قص حتى تكبر الأيقونة بكامل إطارها للخارج
+        val cell = LinearLayout(this).unclip().apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+        val titleTv = tv(11.5f, true, dim).apply {
+            text = label
+            maxLines = 1
+            gravity = Gravity.CENTER
+            setPadding(0, dp(6), 0, 0)
+        }
+        val tile = FrameLayout(this).unclip().apply {
+            background = solidCard(bg, 18, Color.argb(70, 255, 255, 255), 1)
             isFocusable = true
             isClickable = true
             setOnClickListener { go(Intent(Intent.ACTION_MAIN).setClassName(pkg, app.activityInfo.name)) }
             setOnLongClickListener { showAppMenu(app); true }
             setOnFocusChangeListener { v, f ->
-                v.animate().scaleX(if (f) 1.09f else 1f).scaleY(if (f) 1.09f else 1f)
-                    .translationY(if (f) -dp(4).toFloat() else 0f).setDuration(140).start()
-                v.background = solidCard(bg, 20, if (f) Color.WHITE else Color.argb(80, 255, 255, 255), if (f) 3 else 1)
+                v.background = solidCard(bg, 18, if (f) Color.WHITE else Color.argb(70, 255, 255, 255), if (f) 3 else 1)
                 v.elevation = if (f) 28f else 4f
+                cell.translationZ = if (f) dp(14).toFloat() else 0f
+                titleTv.setTextColor(if (f) Color.WHITE else dim)
+                // تكبير الخلية بالكامل للخارج بدون أي قص للأطراف
+                cell.animate()
+                    .scaleX(if (f) 1.1f else 1f)
+                    .scaleY(if (f) 1.1f else 1f)
+                    .translationY(if (f) -dp(4).toFloat() else 0f)
+                    .setDuration(140)
+                    .start()
                 if (f) ambient.glow(glowC)
             }
         }
@@ -880,7 +1052,7 @@ class MainActivity : Activity() {
                 clipToOutline = true
                 outlineProvider = object : ViewOutlineProvider() {
                     override fun getOutline(view: View, outline: Outline) {
-                        outline.setRoundRect(0, 0, view.width, view.height, dp(18).toFloat())
+                        outline.setRoundRect(0, 0, view.width, view.height, dp(15).toFloat())
                     }
                 }
             }, FrameLayout.LayoutParams(-1, -1).apply { setMargins(dp(3), dp(3), dp(3), dp(3)) })
@@ -891,10 +1063,8 @@ class MainActivity : Activity() {
                 scaleType = ImageView.ScaleType.FIT_CENTER
             }, FrameLayout.LayoutParams(isz, isz, Gravity.CENTER))
         }
-        val cell = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         cell.addView(tile, LinearLayout.LayoutParams(w, th))
-        cell.addView(tv(12f, true, dim).apply { text = label; maxLines = 1; gravity = Gravity.CENTER; setPadding(0, dp(6), 0, 0) },
-            LinearLayout.LayoutParams(w, -2))
+        cell.addView(titleTv, LinearLayout.LayoutParams(w, -2))
         return cell
     }
 
@@ -912,7 +1082,7 @@ class MainActivity : Activity() {
         }
 
         val (dialog, box) = shell()
-        box.addView(tv(18f, true, accent).apply { text = label; setPadding(0, 0, 0, dp(14)) })
+        box.addView(tv(17f, true, accent).apply { text = label; setPadding(0, 0, 0, dp(12)) })
         val opts = mutableListOf<Pair<String, () -> Unit>>()
         opts.add((if (inFav) "إزالة من المفضلة ✕" else "تثبيت في المفضلة ⭐") to {
             if (inFav) favs.remove(pkg) else favs.add(pkg)
@@ -923,7 +1093,7 @@ class MainActivity : Activity() {
         opts.add("معلومات التطبيق ℹ️" to { go(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply { data = Uri.fromParts("package", pkg, null) }) })
         opts.add("إلغاء تثبيت التطبيق 🗑️" to { go(Intent(Intent.ACTION_DELETE).apply { data = Uri.fromParts("package", pkg, null) }) })
         for ((title, act) in opts) {
-            box.addView(optionRow(title) { dialog.dismiss(); act() }, LinearLayout.LayoutParams(dp(350), -2).apply { bottomMargin = dp(8) })
+            box.addView(optionRow(title) { dialog.dismiss(); act() }, LinearLayout.LayoutParams(dp(330), -2).apply { bottomMargin = dp(8) })
         }
         dialog.setContentView(box)
         dialog.show()
