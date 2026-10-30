@@ -13,11 +13,13 @@ import android.graphics.*
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewOutlineProvider
@@ -28,6 +30,7 @@ import java.net.URL
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZonedDateTime
 import java.time.chrono.HijrahDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -88,7 +91,8 @@ class MainActivity : Activity() {
     private lateinit var favRow: LinearLayout
     private lateinit var allGrid: GridLayout
     private lateinit var matchesGrid: GridLayout
-    private lateinit var heroBox: LinearLayout
+    private lateinit var homeMatchRow: LinearLayout
+    private lateinit var tickerTv: TextView
     private lateinit var clockTv: TextView
     private lateinit var miniClockTv: TextView
     private lateinit var dayTv: TextView
@@ -103,6 +107,7 @@ class MainActivity : Activity() {
     private var allApps = mutableListOf<ResolveInfo>()
     private var prayersData: List<Prayer> = emptyList()
     private var matchesData: List<Match>? = null
+    private val statusViews = ArrayList<Pair<TextView, Match>>()
     private var lastMin = -1
     private val logoCache = ConcurrentHashMap<String, Bitmap>()
     private val bgCache = ConcurrentHashMap<String, Bitmap>()
@@ -117,19 +122,41 @@ class MainActivity : Activity() {
     )
 
     private fun score(m: Match) = (weights[m.home] ?: 0) + (weights[m.away] ?: 0)
-    private fun strong(m: Match): Boolean {
-        val s = score(m)
-        return if (m.league == "دوري روشن السعودي" || m.league == "أبطال آسيا للنخبة") s >= 60 else s >= 90
-    }
     private fun rank(m: Match) = score(m) + (if (m.live) 60 else 0) - (if (m.note == "انتهت") 200 else 0)
+
+    private fun statusText(m: Match): String = when {
+        m.live -> "مباشر 🔴"
+        m.note == "انتهت" -> "انتهت"
+        else -> {
+            val mins = Duration.between(ZonedDateTime.now(), m.time).toMinutes()
+            when {
+                mins <= 0 -> "تبدأ الآن"
+                mins < 180 -> "بعد ${if (mins >= 60) "${mins / 60} س و " else ""}${mins % 60} د"
+                else -> "بعد ${mins / 60} س"
+            }
+        }
+    }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     private fun city(): City = Data.cities[prefs.getInt("city_idx", 0).coerceIn(0, Data.cities.size - 1)]
 
-    private fun glass(alpha: Int = 140, radius: Int = 20, strokeColor: Int = Color.argb(80, 255, 255, 255), strokeDp: Int = 1) = GradientDrawable().apply {
-        setColor(Color.argb(alpha, 15, 23, 36))
-        cornerRadius = dp(radius).toFloat()
-        if (strokeDp > 0) setStroke(dp(strokeDp), strokeColor)
+    private fun glass(alpha: Int = 140, radius: Int = 20, strokeColor: Int = Color.argb(100, 255, 255, 255), strokeDp: Int = 1): Drawable {
+        val r = dp(radius).toFloat()
+        val base = GradientDrawable().apply {
+            setColor(Color.argb((alpha * 0.4f).toInt().coerceAtMost(110), 8, 12, 26))
+            cornerRadius = r
+        }
+        val shine = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(
+                Color.argb((alpha * 0.42f).toInt().coerceAtMost(255), 255, 255, 255),
+                Color.argb((alpha * 0.14f).toInt().coerceAtMost(255), 255, 255, 255)
+            )
+        ).apply {
+            cornerRadius = r
+            if (strokeDp > 0) setStroke(dp(strokeDp), strokeColor)
+        }
+        return LayerDrawable(arrayOf(base, shine))
     }
 
     private fun solidCard(color: Int, radius: Int = 16, strokeColor: Int = Color.TRANSPARENT, strokeDp: Int = 0) = GradientDrawable().apply {
@@ -213,12 +240,10 @@ class MainActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
-            setPadding(dp(32), dp(18), dp(32), dp(14))
-            clipChildren = false
-            clipToPadding = false
+            setPadding(dp(32), dp(16), dp(32), dp(10))
         }
         root.addView(buildHeader(), LinearLayout.LayoutParams(-1, -2))
-        val box = FrameLayout(this).apply { clipChildren = false; clipToPadding = false }
+        val box = FrameLayout(this)
         pages = listOf(buildHomePage(), buildMatchesPage(), buildAppsPage())
         pages.forEach { box.addView(it, FrameLayout.LayoutParams(-1, -1)) }
         root.addView(box, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -267,7 +292,15 @@ class MainActivity : Activity() {
             h.addView(t, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(6) })
             t
         }
-        h.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
+        tickerTv = tv(12.5f, false, dim).apply {
+            setSingleLine(true)
+            ellipsize = TextUtils.TruncateAt.MARQUEE
+            marqueeRepeatLimit = -1
+            isSelected = true
+            gravity = Gravity.CENTER
+            setPadding(dp(18), 0, dp(18), 0)
+        }
+        h.addView(tickerTv, LinearLayout.LayoutParams(0, -2, 1f))
         miniClockTv = tv(14f, true, dim).apply { setPadding(dp(10), 0, dp(6), 0) }
         h.addView(miniClockTv)
         h.addView(capsule("المدينة", 3) { openCityPicker() })
@@ -279,23 +312,19 @@ class MainActivity : Activity() {
     private fun buildHomePage(): View {
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            clipChildren = false
-            clipToPadding = false
-            setPadding(dp(4), dp(8), dp(4), dp(24))
+            setPadding(dp(14), dp(8), dp(14), dp(20))
         }
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            clipChildren = false
-            clipToPadding = false
         }
-        val ww = dp(230)
-        val wh = dp(145)
+        val ww = dp(225)
+        val wh = dp(140)
 
         val wCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = glass(140, 22)
-            setPadding(dp(16), dp(12), dp(16), dp(12))
+            background = glass(150, 22)
+            setPadding(dp(16), dp(10), dp(16), dp(10))
             val head = LinearLayout(context).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 addView(tv(13f, true, dim).apply { text = "الطقس" })
@@ -306,14 +335,14 @@ class MainActivity : Activity() {
             addView(head)
             val tempRow = LinearLayout(context).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, dp(4), 0, dp(2))
+                setPadding(0, dp(2), 0, dp(2))
             }
-            tempRow.addView(sunView(), LinearLayout.LayoutParams(dp(34), dp(34)))
-            tempTv = tv(36f, true).apply { text = "--°"; setPadding(dp(10), 0, 0, 0) }
+            tempRow.addView(sunView(), LinearLayout.LayoutParams(dp(32), dp(32)))
+            tempTv = tv(34f, true).apply { text = "--°"; setPadding(dp(10), 0, 0, 0) }
             tempRow.addView(tempTv)
             addView(tempRow)
             weatherStatusTv = tv(12f, true).apply { text = "جاري التحديث..." }
-            weatherSubTv = tv(10.5f, false, dim).apply { text = ""; setLineSpacing(0f, 1.15f) }
+            weatherSubTv = tv(10.5f, false, dim).apply { text = ""; setLineSpacing(0f, 1.1f) }
             addView(weatherStatusTv)
             addView(weatherSubTv)
         }
@@ -321,12 +350,12 @@ class MainActivity : Activity() {
 
         val pCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = glass(140, 22)
-            setPadding(dp(16), dp(10), dp(16), dp(10))
+            background = glass(150, 22)
+            setPadding(dp(16), dp(8), dp(16), dp(8))
             addView(tv(13f, true, dim).apply { text = "أوقات الصلاة"; gravity = Gravity.CENTER })
             prayerLayout = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(0, dp(4), 0, dp(2))
+                setPadding(0, dp(3), 0, dp(2))
             }
             addView(prayerLayout, LinearLayout.LayoutParams(-1, 0, 1f))
             prayerTimerTv = tv(11f, true, gold).apply { text = "جاري تحديث المواقيت..."; gravity = Gravity.CENTER }
@@ -339,45 +368,43 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.END
         }
-        clockTv = tv(68f, true).apply { gravity = Gravity.END }
-        dayTv = tv(18f, true).apply { gravity = Gravity.END }
-        datesTv = tv(12.5f, false, dim).apply { gravity = Gravity.END; setLineSpacing(0f, 1.2f) }
+        clockTv = tv(60f, true).apply { gravity = Gravity.END }
+        dayTv = tv(17f, true).apply { gravity = Gravity.END }
+        datesTv = tv(12f, false, dim).apply { gravity = Gravity.END; setLineSpacing(0f, 1.15f) }
         clockBox.addView(clockTv)
         clockBox.addView(dayTv)
         clockBox.addView(datesTv)
         top.addView(clockBox)
         col.addView(top, LinearLayout.LayoutParams(-1, -2))
 
-        col.addView(tv(15f, true).apply { text = "أهم مباراة اليوم"; setPadding(dp(4), dp(16), 0, dp(6)) })
-        heroBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; clipChildren = false; clipToPadding = false }
-        col.addView(heroBox, LinearLayout.LayoutParams(-1, -2))
+        col.addView(tv(13f, true, dim).apply { text = "مباريات اليوم"; setPadding(dp(6), dp(12), 0, dp(2)) })
+        homeMatchRow = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+        }
+        col.addView(HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(homeMatchRow)
+        }, LinearLayout.LayoutParams(-1, -2))
 
-        col.addView(tv(15f, true).apply { text = "المفضلة"; setPadding(dp(4), dp(16), 0, dp(6)) })
+        col.addView(tv(13f, true, dim).apply { text = "المفضلة"; setPadding(dp(6), dp(8), 0, dp(6)) })
         val dock = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = glass(110, 28)
-            setPadding(dp(18), dp(14), dp(18), dp(8))
-            clipChildren = false
-            clipToPadding = false
+            background = glass(120, 28)
+            setPadding(dp(14), dp(10), dp(14), dp(6))
         }
         favRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            clipChildren = false
-            clipToPadding = false
-            setPadding(0, dp(8), 0, dp(6))
+            setPadding(dp(16), dp(8), dp(16), dp(4))
         }
         dock.addView(HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
-            clipChildren = false
-            clipToPadding = false
             addView(favRow)
         }, LinearLayout.LayoutParams(-1, -2))
         col.addView(dock, LinearLayout.LayoutParams(-1, -2))
 
         return ScrollView(this).apply {
             isVerticalScrollBarEnabled = false
-            clipChildren = false
-            clipToPadding = false
             addView(col)
         }
     }
@@ -385,36 +412,24 @@ class MainActivity : Activity() {
     private fun buildMatchesPage(): View {
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            clipChildren = false
-            clipToPadding = false
-            setPadding(dp(4), dp(8), dp(4), dp(24))
+            setPadding(dp(14), dp(8), dp(14), dp(24))
         }
-        col.addView(tv(20f, true).apply { text = "أقوى مباريات اليوم"; setPadding(dp(4), dp(6), 0, dp(8)) })
-        matchesGrid = GridLayout(this).apply {
-            columnCount = 3
-            clipChildren = false
-            clipToPadding = false
-        }
+        col.addView(tv(20f, true).apply { text = "كل مباريات اليوم"; setPadding(dp(6), dp(6), 0, dp(8)) })
+        matchesGrid = GridLayout(this).apply { columnCount = 3 }
         col.addView(matchesGrid, LinearLayout.LayoutParams(-1, -2))
         return ScrollView(this).apply {
             isVerticalScrollBarEnabled = false
-            clipChildren = false
-            clipToPadding = false
             addView(col)
         }
     }
 
     private fun buildAppsPage(): View {
         allGrid = GridLayout(this).apply {
-            columnCount = 5
-            clipChildren = false
-            clipToPadding = false
-            setPadding(dp(4), dp(10), dp(4), dp(30))
+            columnCount = 6
+            setPadding(dp(16), dp(14), dp(16), dp(30))
         }
         return ScrollView(this).apply {
             isVerticalScrollBarEnabled = false
-            clipChildren = false
-            clipToPadding = false
             addView(allGrid)
         }
     }
@@ -469,7 +484,7 @@ class MainActivity : Activity() {
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            background = glass(130, 24, Color.argb(90, 255, 255, 255), 1)
+            background = glass(140, 24)
             setPadding(dp(11), dp(9), dp(11), dp(9))
             isFocusable = true
             isClickable = true
@@ -481,7 +496,7 @@ class MainActivity : Activity() {
         box.addView(title)
         box.setOnFocusChangeListener { v, f ->
             title.visibility = if (f) View.VISIBLE else View.GONE
-            v.background = glass(if (f) 215 else 130, 24, if (f) Color.WHITE else Color.argb(90, 255, 255, 255), if (f) 2 else 1)
+            v.background = glass(if (f) 230 else 140, 24, if (f) Color.WHITE else Color.argb(100, 255, 255, 255), if (f) 2 else 1)
             v.animate().scaleX(if (f) 1.08f else 1f).scaleY(if (f) 1.08f else 1f).setDuration(120).start()
         }
         box.layoutParams = LinearLayout.LayoutParams(-2, dp(44)).apply { marginStart = dp(8) }
@@ -529,7 +544,7 @@ class MainActivity : Activity() {
         isFocusable = true
         isClickable = true
         setOnClickListener { onClick() }
-        setOnFocusChangeListener { v, f -> v.background = glass(if (f) 190 else 100, 14, if (f) Color.WHITE else Color.TRANSPARENT, if (f) 2 else 0) }
+        setOnFocusChangeListener { v, f -> v.background = glass(if (f) 200 else 100, 14, if (f) Color.WHITE else Color.TRANSPARENT, if (f) 2 else 0) }
     }
 
     private fun openSettingsDialog() {
@@ -540,13 +555,13 @@ class MainActivity : Activity() {
         fun card(icon: String, title: String, sub: String, act: () -> Unit) {
             val c = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                background = glass(110, 18, Color.argb(60, 255, 255, 255), 1)
+                background = glass(120, 18)
                 setPadding(dp(18), dp(14), dp(18), dp(14))
                 isFocusable = true
                 isClickable = true
                 setOnClickListener { dialog.dismiss(); act() }
                 setOnFocusChangeListener { v, f ->
-                    v.background = glass(if (f) 190 else 110, 18, if (f) Color.WHITE else Color.argb(60, 255, 255, 255), if (f) 2 else 1)
+                    v.background = glass(if (f) 210 else 120, 18, if (f) Color.WHITE else Color.argb(100, 255, 255, 255), if (f) 2 else 1)
                     v.animate().scaleX(if (f) 1.04f else 1f).scaleY(if (f) 1.04f else 1f).setDuration(110).start()
                 }
                 addView(tv(24f).apply { text = icon })
@@ -621,21 +636,24 @@ class MainActivity : Activity() {
     }
 
     private fun renderMatches() {
-        if (!::heroBox.isInitialized) return
-        heroBox.removeAllViews()
+        if (!::homeMatchRow.isInitialized) return
+        homeMatchRow.removeAllViews()
         matchesGrid.removeAllViews()
+        statusViews.clear()
         val all = matchesData
-        val list = all?.filter { strong(it) }?.sortedByDescending { rank(it) }
+        val list = all?.sortedWith(compareByDescending<Match> { rank(it) }.thenBy { it.time })
+        tickerTv.text = if (list == null || list.isEmpty()) "" else "⚽  " + list.take(4).joinToString("   •   ") { "${it.home} × ${it.away}  ${it.center}" }
         if (list == null || list.isEmpty()) {
-            val msg = if (all == null) "تعذر تحميل المباريات، تأكد من الاتصال" else "لا توجد مباريات قوية اليوم"
-            heroBox.addView(tv(15f, false, dim).apply { text = msg; setPadding(dp(8), dp(14), dp(8), dp(14)) })
+            val msg = if (all == null) "تعذر تحميل المباريات، تأكد من الاتصال" else "لا توجد مباريات اليوم"
+            homeMatchRow.addView(tv(15f, false, dim).apply { text = msg; setPadding(dp(8), dp(14), dp(8), dp(14)) })
             matchesGrid.addView(tv(15f, false, dim).apply { text = msg; setPadding(dp(8), dp(14), dp(8), dp(14)) })
             return
         }
-        heroBox.addView(matchCard(list.first(), true), LinearLayout.LayoutParams(dp(620), -2))
-        val w = ((resources.displayMetrics.widthPixels - dp(90)) / 3) - dp(16)
+        val cw = (resources.displayMetrics.widthPixels - dp(64) - dp(28) - dp(20)) / 4 - dp(10)
+        for (m in list) homeMatchRow.addView(miniMatch(m), LinearLayout.LayoutParams(cw, -2).apply { marginEnd = dp(10) })
+        val w = (resources.displayMetrics.widthPixels - dp(64) - dp(28) - 3 * dp(16)) / 3
         for (m in list) {
-            matchesGrid.addView(matchCard(m, false), GridLayout.LayoutParams().apply {
+            matchesGrid.addView(matchCard(m), GridLayout.LayoutParams().apply {
                 width = w
                 height = -2
                 setMargins(dp(8), dp(8), dp(8), dp(8))
@@ -643,8 +661,45 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun matchCard(m: Match, big: Boolean): View {
-        val logo = if (big) dp(56) else dp(40)
+    private fun miniLogo(name: String, url: String): ImageView {
+        val iv = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_CENTER; setImageDrawable(crest(name)) }
+        if (url.isNotEmpty()) loadLogo(url, iv)
+        return iv
+    }
+
+    private fun miniMatch(m: Match): View {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = glass(150, 20)
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            isFocusable = true
+            isClickable = true
+            setOnFocusChangeListener { v, f ->
+                v.background = glass(if (f) 220 else 150, 20, if (f) Color.WHITE else Color.argb(100, 255, 255, 255), if (f) 2 else 1)
+                v.animate().scaleX(if (f) 1.06f else 1f).scaleY(if (f) 1.06f else 1f).setDuration(120).start()
+            }
+        }
+        val head = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        head.addView(tv(10f, true, accent).apply { text = m.league; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
+        val st = tv(10f, false, dim).apply { text = statusText(m); maxLines = 1 }
+        statusViews.add(st to m)
+        head.addView(st)
+        card.addView(head, LinearLayout.LayoutParams(-1, -2))
+        val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(6), 0, dp(4)) }
+        row.addView(miniLogo(m.home, m.homeLogo), LinearLayout.LayoutParams(dp(30), dp(30)))
+        row.addView(tv(15f, true, gold).apply { text = m.center; gravity = Gravity.CENTER; maxLines = 1 }, LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(miniLogo(m.away, m.awayLogo), LinearLayout.LayoutParams(dp(30), dp(30)))
+        card.addView(row, LinearLayout.LayoutParams(-1, -2))
+        card.addView(tv(11f, true).apply {
+            text = "${m.home} × ${m.away}"
+            maxLines = 1
+            gravity = Gravity.CENTER
+            ellipsize = TextUtils.TruncateAt.END
+        }, LinearLayout.LayoutParams(-1, -2))
+        return card
+    }
+
+    private fun matchCard(m: Match): View {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
@@ -653,32 +708,28 @@ class MainActivity : Activity() {
             isFocusable = true
             isClickable = true
             setOnFocusChangeListener { v, f ->
-                v.background = glass(if (f) 210 else 150, 22, if (f) Color.WHITE else Color.argb(80, 255, 255, 255), if (f) 2 else 1)
+                v.background = glass(if (f) 220 else 150, 22, if (f) Color.WHITE else Color.argb(100, 255, 255, 255), if (f) 2 else 1)
                 v.animate().scaleX(if (f) 1.05f else 1f).scaleY(if (f) 1.05f else 1f).setDuration(120).start()
             }
         }
         val head = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        head.addView(tv(if (big) 12.5f else 11f, true, accent).apply { text = m.league; maxLines = 1 })
+        head.addView(tv(11f, true, accent).apply { text = m.league; maxLines = 1 })
         head.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
-        val status = when { m.live -> "مباشر الآن 🔴"; m.note.isNotEmpty() -> m.note; else -> "اليوم" }
-        head.addView(tv(if (big) 12f else 10.5f, false, dim).apply { text = status })
+        val st = tv(10.5f, false, dim).apply { text = statusText(m) }
+        statusViews.add(st to m)
+        head.addView(st)
         card.addView(head, LinearLayout.LayoutParams(-1, -2))
         val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(8), 0, dp(4)) }
-        row.addView(clubColumn(m.home, m.homeLogo, logo), LinearLayout.LayoutParams(0, -2, 1f))
-        row.addView(tv(if (big) 28f else 18f, true, gold).apply { text = m.center; gravity = Gravity.CENTER; setPadding(dp(8), 0, dp(8), 0) })
-        row.addView(clubColumn(m.away, m.awayLogo, logo), LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(clubColumn(m.home, m.homeLogo), LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(tv(18f, true, gold).apply { text = m.center; gravity = Gravity.CENTER; setPadding(dp(8), 0, dp(8), 0) })
+        row.addView(clubColumn(m.away, m.awayLogo), LinearLayout.LayoutParams(0, -2, 1f))
         card.addView(row, LinearLayout.LayoutParams(-1, -2))
         return card
     }
 
-    private fun clubColumn(name: String, logoUrl: String, size: Int): LinearLayout {
+    private fun clubColumn(name: String, logoUrl: String): LinearLayout {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
-        val iv = ImageView(this).apply {
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            setImageDrawable(crest(name))
-        }
-        if (logoUrl.isNotEmpty()) loadLogo(logoUrl, iv)
-        col.addView(iv, LinearLayout.LayoutParams(size, size))
+        col.addView(miniLogo(name, logoUrl), LinearLayout.LayoutParams(dp(40), dp(40)))
         col.addView(tv(12f, true).apply { text = name; maxLines = 2; gravity = Gravity.CENTER; setPadding(0, dp(4), 0, 0) })
         return col
     }
@@ -733,18 +784,20 @@ class MainActivity : Activity() {
             .sortedBy { it.loadLabel(pm).toString() }
             .toMutableList()
         val favPkgs = prefs.getString("fav_apps", "")?.split(",")?.filter { it.isNotEmpty() } ?: emptyList()
+        val sw = resources.displayMetrics.widthPixels
 
         favRow.removeAllViews()
-        val favList = if (favPkgs.isNotEmpty()) favPkgs.mapNotNull { pkg -> allApps.find { it.activityInfo.packageName == pkg } } else allApps.take(7)
-        for (a in favList) favRow.addView(createCell(a, dp(176)), LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(14) })
+        val favList = if (favPkgs.isNotEmpty()) favPkgs.mapNotNull { pkg -> allApps.find { it.activityInfo.packageName == pkg } } else allApps.take(6)
+        val fw = (sw - dp(64) - dp(28) - dp(32) - 6 * dp(12)) / 6
+        for (a in favList) favRow.addView(createCell(a, fw), LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(12) })
 
         allGrid.removeAllViews()
-        val gw = ((resources.displayMetrics.widthPixels - dp(72)) / 5) - dp(20)
+        val gw = (sw - dp(64) - dp(32) - 6 * dp(16)) / 6
         for (a in allApps) {
             allGrid.addView(createCell(a, gw), GridLayout.LayoutParams().apply {
                 width = -2
                 height = -2
-                setMargins(dp(10), dp(10), dp(10), dp(10))
+                setMargins(dp(8), dp(8), dp(8), dp(8))
             })
         }
         if (currentPage == 0) ((favRow.getChildAt(0) as? LinearLayout)?.getChildAt(0))?.requestFocus()
@@ -797,18 +850,18 @@ class MainActivity : Activity() {
         val banner: Drawable? = try { app.activityInfo.loadBanner(pm) ?: app.activityInfo.applicationInfo.loadBanner(pm) } catch (e: Throwable) { null }
         val bg = if (banner != null) 0xFF121826.toInt() else brandBg(label, pkg, icon)
         val glowC = dominant(banner ?: icon)
-        val th = w * 9 / 16
+        val th = (w * 0.52f).toInt()
 
         val tile = FrameLayout(this).apply {
-            background = solidCard(bg, 20, Color.argb(60, 255, 255, 255), 1)
+            background = solidCard(bg, 18, Color.argb(70, 255, 255, 255), 1)
             isFocusable = true
             isClickable = true
             setOnClickListener { go(Intent(Intent.ACTION_MAIN).setClassName(pkg, app.activityInfo.name)) }
             setOnLongClickListener { showAppMenu(app); true }
             setOnFocusChangeListener { v, f ->
                 v.animate().scaleX(if (f) 1.1f else 1f).scaleY(if (f) 1.1f else 1f)
-                    .translationY(if (f) -dp(4).toFloat() else 0f).setDuration(140).start()
-                v.background = solidCard(bg, 20, if (f) Color.WHITE else Color.argb(60, 255, 255, 255), if (f) 3 else 1)
+                    .translationY(if (f) -dp(3).toFloat() else 0f).setDuration(140).start()
+                v.background = solidCard(bg, 18, if (f) Color.WHITE else Color.argb(70, 255, 255, 255), if (f) 3 else 1)
                 v.elevation = if (f) 26f else 4f
                 if (f) ambient.glow(glowC)
             }
@@ -820,19 +873,20 @@ class MainActivity : Activity() {
                 clipToOutline = true
                 outlineProvider = object : ViewOutlineProvider() {
                     override fun getOutline(view: View, outline: Outline) {
-                        outline.setRoundRect(0, 0, view.width, view.height, dp(16).toFloat())
+                        outline.setRoundRect(0, 0, view.width, view.height, dp(15).toFloat())
                     }
                 }
             }, FrameLayout.LayoutParams(-1, -1).apply { setMargins(dp(3), dp(3), dp(3), dp(3)) })
         } else {
+            val isz = (th * 0.62f).toInt()
             tile.addView(ImageView(this).apply {
                 setImageDrawable(icon)
                 scaleType = ImageView.ScaleType.FIT_CENTER
-            }, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER))
+            }, FrameLayout.LayoutParams(isz, isz, Gravity.CENTER))
         }
-        val cell = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; clipChildren = false; clipToPadding = false }
+        val cell = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         cell.addView(tile, LinearLayout.LayoutParams(w, th))
-        cell.addView(tv(12f, true, dim).apply { text = label; maxLines = 1; gravity = Gravity.CENTER; setPadding(0, dp(8), 0, 0) },
+        cell.addView(tv(11.5f, true, dim).apply { text = label; maxLines = 1; gravity = Gravity.CENTER; setPadding(0, dp(6), 0, 0) },
             LinearLayout.LayoutParams(w, -2))
         return cell
     }
@@ -841,7 +895,7 @@ class MainActivity : Activity() {
         val pkg = app.activityInfo.packageName
         val label = app.loadLabel(packageManager).toString()
         val favs = (prefs.getString("fav_apps", "")?.split(",")?.filter { it.isNotEmpty() } ?: emptyList()).toMutableList()
-        if (favs.isEmpty()) favs.addAll(allApps.take(7).map { it.activityInfo.packageName })
+        if (favs.isEmpty()) favs.addAll(allApps.take(6).map { it.activityInfo.packageName })
         val inFav = favs.contains(pkg)
         val idx = favs.indexOf(pkg)
 
@@ -877,7 +931,11 @@ class MainActivity : Activity() {
             val m = LocalDate.now().format(DateTimeFormatter.ofPattern("d MMMM yyyy م", ar))
             val h = try { HijrahDate.now().format(DateTimeFormatter.ofPattern("d MMMM yyyy هـ", ar)) } catch (e: Throwable) { "" }
             datesTv.text = if (h.isNotEmpty()) "$h\n$m" else m
-            if (now.minute != lastMin) { lastMin = now.minute; renderPrayers() }
+            if (now.minute != lastMin) {
+                lastMin = now.minute
+                renderPrayers()
+                for ((t, mt) in statusViews) t.text = statusText(mt)
+            }
         } catch (e: Throwable) { }
         ui.postDelayed({ updateClock() }, 10000)
     }
@@ -915,7 +973,7 @@ class MainActivity : Activity() {
             prayerLayout.addView(LinearLayout(this).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(6), dp(1), dp(6), dp(1))
-                if (on) background = glass(180, 8)
+                if (on) background = glass(190, 8, Color.TRANSPARENT, 0)
                 addView(tv(11.5f, on, if (on) accent else dim).apply { text = p.name }, LinearLayout.LayoutParams(0, -2, 1f))
                 addView(tv(11.5f, on).apply { text = p.time.format(f) })
             })
