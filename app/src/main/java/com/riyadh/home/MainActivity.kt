@@ -65,15 +65,12 @@ class AmbientView(c: Context) : View(c) {
         val g = Color.green(color)
         val b = Color.blue(color)
         
-        // طبقة 4K سينمائية عميقة بتدرجات متعددة متوافقة مع شاشات 4K الحديثة
         paint.shader = LinearGradient(0f, 0f, w, h, intArrayOf(0xFF020408.toInt(), 0xFF080D1A.toInt(), 0xFF0F0B1E.toInt()), null, Shader.TileMode.CLAMP)
         cv.drawRect(0f, 0f, w, h, paint)
         
-        // إضاءة تفاعلية علوية سينمائية
         paint.shader = RadialGradient(w * 0.75f, h * 0.2f, w * 0.7f, Color.argb(150, r, g, b), Color.TRANSPARENT, Shader.TileMode.CLAMP)
         cv.drawRect(0f, 0f, w, h, paint)
         
-        // إضاءة تفاعلية سفلية ناعمة لتعزيز العمق البصري
         paint.shader = RadialGradient(w * 0.15f, h * 0.9f, w * 0.6f, Color.argb(95, r, g, b), Color.TRANSPARENT, Shader.TileMode.CLAMP)
         cv.drawRect(0f, 0f, w, h, paint)
     }
@@ -370,7 +367,6 @@ class MainActivity : Activity() {
         top.addView(pCard, LinearLayout.LayoutParams(ww, wh).apply { marginStart = dp(16) })
         top.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
 
-        // ** التعديل الجذري لشكل ومكان وتصميم الساعة لتكون أنيقة بارزة ومصممة بعناية **
         val clockBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.START
@@ -939,7 +935,7 @@ class MainActivity : Activity() {
             clockTv.text = now.format(DateTimeFormatter.ofPattern("h:mm a", ar))
             miniClockTv.text = now.format(DateTimeFormatter.ofPattern("HH:mm", Locale.ENGLISH))
             dayTv.text = LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE", ar))
-            val m = LocalDate.Now().format(DateTimeFormatter.ofPattern("d MMMM yyyy م", ar))
+            val m = LocalDate.now().format(DateTimeFormatter.ofPattern("d MMMM yyyy م", ar))
             val h = try { HijrahDate.now().format(DateTimeFormatter.ofPattern("d MMMM yyyy هـ", ar)) } catch (e: Throwable) { "" }
             datesTv.text = if (h.isNotEmpty()) "$h\n$m" else m
             if (now.minute != lastMin) {
