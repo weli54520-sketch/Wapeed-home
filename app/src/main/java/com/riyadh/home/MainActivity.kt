@@ -106,7 +106,6 @@ class AmbientView(c: Context) : View(c) {
         val dx = Math.sin(phase.toDouble()).toFloat() * w * 0.035f
         val dy = Math.cos(phase.toDouble()).toFloat() * h * 0.035f
 
-        // 1. الخلفية الأساسية العميقة 4K
         paint.shader = LinearGradient(
             0f, 0f, w, h,
             intArrayOf(0xFF06070B.toInt(), 0xFF0C0F17.toInt(), 0xFF08090F.toInt()),
@@ -115,7 +114,6 @@ class AmbientView(c: Context) : View(c) {
         )
         cv.drawRect(0f, 0f, w, h, paint)
 
-        // 2. إضاءة محيطية علوية غنية خلف الهيدر واللوحة الزجاجية
         paint.shader = RadialGradient(
             w * 0.35f + dx, h * 0.18f + dy, w * 0.65f,
             intArrayOf(Color.argb(175, r, g, b), Color.argb(75, sr, sg, sb), Color.TRANSPARENT),
@@ -124,7 +122,6 @@ class AmbientView(c: Context) : View(c) {
         )
         cv.drawRect(0f, 0f, w, h, paint)
 
-        // 3. إضاءة محيطية يمنى خلف الساعة والطقس
         paint.shader = RadialGradient(
             w * 0.85f - dx, h * 0.25f - dy, w * 0.55f,
             intArrayOf(Color.argb(130, r, g, b), Color.argb(45, r, g, b), Color.TRANSPARENT),
@@ -133,7 +130,6 @@ class AmbientView(c: Context) : View(c) {
         )
         cv.drawRect(0f, 0f, w, h, paint)
 
-        // 4. توهج سفلي ناعم خلف شريط التطبيقات (Dock)
         paint.shader = RadialGradient(
             w * 0.5f - dy, h * 0.92f + dx * 0.4f, w * 0.6f,
             intArrayOf(Color.argb(120, sr, sg, sb), Color.argb(40, r, g, b), Color.TRANSPARENT),
@@ -142,7 +138,6 @@ class AmbientView(c: Context) : View(c) {
         )
         cv.drawRect(0f, 0f, w, h, paint)
 
-        // 5. تظليل أطراف سينمائي (Vignette) لإبراز اللوحات الزجاجية
         paint.shader = LinearGradient(
             0f, 0f, 0f, h,
             intArrayOf(Color.argb(40, 0, 0, 0), Color.TRANSPARENT, Color.argb(95, 0, 0, 0)),
@@ -158,7 +153,6 @@ class MainActivity : Activity() {
     private val ui = Handler(Looper.getMainLooper())
     private lateinit var prefs: SharedPreferences
 
-    // ألوان مستوحاة من الواجهة الاحترافية في الصورة
     private val accent = Color.parseColor("#2DD4BF")
     private val gold = Color.parseColor("#FBBF24")
     private val greenBadge = Color.parseColor("#22C55E")
@@ -201,7 +195,6 @@ class MainActivity : Activity() {
     private val bgCache = ConcurrentHashMap<String, Bitmap>()
     private val feedsTask = Runnable { fetchMatches(); refreshFeeds() }
 
-    // متغيرات وضع التحريك الحر لتطبيقات المفضلة
     private var reorderingPkg: String? = null
     private var reorderList = mutableListOf<String>()
 
@@ -248,7 +241,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // تصميم اللوحات الزجاجية الموحدة المطابقة للصورة
     private fun slateGlass(
         fillAlpha: Int = 210,
         radius: Int = 24,
@@ -305,7 +297,6 @@ class MainActivity : Activity() {
         catch (e: Throwable) { Toast.makeText(this, "غير متاح على هذا الجهاز", Toast.LENGTH_SHORT).show() }
     }
 
-    // التحكم في زر TV لريموت شاومي + وضع التحريك الحر للمفضلة
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         when (event.keyCode) {
             KeyEvent.KEYCODE_TV,
@@ -471,7 +462,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // الشريط العلوي المقتبس من الصورة: الترحيب + الساعة + الفاصل + التاريخ | كبسولات الإعدادات والتبويبات
     private fun buildHeader(): View {
         val h = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.HORIZONTAL
@@ -479,7 +469,6 @@ class MainActivity : Activity() {
             setPadding(dp(4), dp(2), dp(4), dp(10))
         }
 
-        // يمين الهيدر: الترحيب فوق الساعة + خط فاصل + اليوم والتاريخ
         val rightCluster = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.START
@@ -515,7 +504,6 @@ class MainActivity : Activity() {
 
         h.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
 
-        // يسار الهيدر: كبسولات التبويبات + كبسولة الواي فاي (بشارة خضراء) + المدينة + الإعدادات
         val names = listOf("الرئيسية", "المباريات", "التطبيقات")
         val pList = mutableListOf<LinearLayout>()
         val tList = mutableListOf<TextView>()
@@ -551,7 +539,6 @@ class MainActivity : Activity() {
         return h
     }
 
-    // كبسولة الواي فاي المطابقة للصورة مع الشارة الخضراء (Connected / متصل)
     private fun wifiCapsule(): View {
         val glyph = GlyphView(this, 0)
         val title = tv(13f, true, Color.WHITE).apply {
@@ -639,14 +626,13 @@ class MainActivity : Activity() {
         }
     }
 
-    // الصفحة الرئيسية: اللوحة الزجاجية الموحدة في المنتصف + شريط التطبيقات السفلي العريض (Dock)
     private fun buildHomePage(): View {
         val col = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(4), dp(4), dp(4), dp(8))
         }
 
-        // 1. اللوحة الزجاجية الموحدة (تجمع الطقس + الصلاة + مباريات اليوم بتناسق الصورة تماماً)
+        // اللوحة الزجاجية الموحدة مع ترتيب عربي صحيح 100% (يمين: طقس، وسط: صلاة، يسار: مباريات)
         val unifiedBoard = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.HORIZONTAL
             background = slateGlass(215, 26, Color.argb(55, 255, 255, 255), 1)
@@ -654,7 +640,7 @@ class MainActivity : Activity() {
             roundOutline(26)
         }
 
-        // القسم الأول (يمين اللوحة): الطقس والأجواء
+        // 1. القسم الأيمن: الطقس
         val weatherCol = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(4), 0, dp(14), 0)
@@ -691,12 +677,12 @@ class MainActivity : Activity() {
         weatherCol.addView(weatherSubTv)
         unifiedBoard.addView(weatherCol, LinearLayout.LayoutParams(dp(210), -1))
 
-        // فاصل عمودي زجاجي 1
+        // فاصل عمودي 1
         unifiedBoard.addView(View(this).apply {
             background = solidCard(Color.argb(35, 255, 255, 255), 1)
         }, LinearLayout.LayoutParams(dp(1), -1).apply { setMargins(dp(4), dp(6), dp(14), dp(6)) })
 
-        // القسم الثاني (وسط اللوحة): مواقيت الصلاة
+        // 2. القسم الأوسط: مواقيت الصلاة
         val prayerCol = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(4), 0, dp(14), 0)
@@ -717,12 +703,12 @@ class MainActivity : Activity() {
         prayerCol.addView(prayerTimerTv)
         unifiedBoard.addView(prayerCol, LinearLayout.LayoutParams(dp(235), -1))
 
-        // فاصل عمودي زجاجي 2
+        // فاصل عمودي 2
         unifiedBoard.addView(View(this).apply {
             background = solidCard(Color.argb(35, 255, 255, 255), 1)
         }, LinearLayout.LayoutParams(dp(1), -1).apply { setMargins(dp(4), dp(6), dp(14), dp(6)) })
 
-        // القسم الثالث (يسار اللوحة): مباريات اليوم التفاعلية + شريط النتائج
+        // 3. القسم الأيسر: مباريات اليوم (مع دعم اعلام الأندية واللوغوهات الأصلية)
         val matchesCol = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.VERTICAL
         }
@@ -759,11 +745,9 @@ class MainActivity : Activity() {
         unifiedBoard.addView(matchesCol, LinearLayout.LayoutParams(0, -1, 1f))
 
         col.addView(unifiedBoard, LinearLayout.LayoutParams(-1, dp(195)))
-
-        // مسافة مرنة بين اللوحة العلوية وشريط المفضلة السفلي
         col.addView(View(this), LinearLayout.LayoutParams(-1, dp(14)))
 
-        // 2. شريط التطبيقات السفلي العريض (Dock) المطابق للصورة مع دعم التحريك الحر
+        // شريط التطبيقات السفلي (Dock)
         val dock = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.VERTICAL
             background = slateGlass(210, 28, Color.argb(55, 255, 255, 255), 1)
@@ -783,7 +767,6 @@ class MainActivity : Activity() {
         favRow = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            // مساحة كافية جداً حول الأيقونات حتى تكبر بكاملها 100% للخارج بدون أي قص
             setPadding(dp(16), dp(14), dp(16), dp(10))
             layoutTransition = LayoutTransition().apply {
                 setDuration(180)
@@ -1197,7 +1180,6 @@ class MainActivity : Activity() {
         else allApps.take(6).map { it.activityInfo.packageName }.toMutableList()
     }
 
-    // تفعيل وضع التحريك الحر المباشر بالأسهم
     private fun startReorderMode(pkg: String) {
         reorderingPkg = pkg
         reorderList = getSavedFavs()
@@ -1206,7 +1188,6 @@ class MainActivity : Activity() {
         loadAppsAndDock(focusPkg = pkg)
     }
 
-    // تحريك البطاقة فوراً أمام عينك مع الحفاظ على التركيز
     private fun moveFavoriteLive(delta: Int) {
         val pkg = reorderingPkg ?: return
         val idx = reorderList.indexOf(pkg)
@@ -1214,12 +1195,10 @@ class MainActivity : Activity() {
         val targetIdx = idx + delta
         if (targetIdx < 0 || targetIdx >= reorderList.size) return
 
-        // تبديل العناصر في القائمة وحفظها
         val item = reorderList.removeAt(idx)
         reorderList.add(targetIdx, item)
         prefs.edit().putString("fav_apps", reorderList.joinToString(",")).apply()
 
-        // تحريك العنصر المجاور في الـ Layout حتى لا يفقد العنصر المتحرك التركيز أبداً
         val neighborView = favRow.getChildAt(targetIdx) ?: return
         favRow.removeViewAt(targetIdx)
         favRow.addView(neighborView, idx)
@@ -1250,7 +1229,6 @@ class MainActivity : Activity() {
 
         favRow.removeAllViews()
         val favList = favPkgs.mapNotNull { pkg -> allApps.find { it.activityInfo.packageName == pkg } }
-        // حجم بطاقات الشريط السفلي كبير وعريض مثل بطاقات YouTube و Spotify في الصورة
         val fw = (sw - dp(68) - dp(36) - dp(32) - 5 * dp(16)) / 5
         var viewToFocus: View? = null
 
@@ -1301,7 +1279,6 @@ class MainActivity : Activity() {
 
     private fun darker(c: Int) = Color.rgb((Color.red(c) * 0.55f).toInt(), (Color.green(c) * 0.55f).toInt(), (Color.blue(c) * 0.55f).toInt())
 
-    // ألوان البطاقات الرسمية الصريحة مثل الصورة (YouTube أبيض، Spotify داكن، Twitch بنفسجي، Netflix أسود)
     private fun brandBg(label: String, pkg: String, icon: Drawable): Int {
         val key = "$label $pkg".lowercase(Locale.ROOT)
         return when {
@@ -1321,7 +1298,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // تصميم بطاقة التطبيق مع تكبير كامل للخارج 100% بدون أي قص للأطراف أو انكماش للداخل
     private fun createCell(app: ResolveInfo, w: Int, isDock: Boolean): View {
         val pm = packageManager
         val pkg = app.activityInfo.packageName
@@ -1346,7 +1322,6 @@ class MainActivity : Activity() {
             setPadding(dp(4), dp(7), dp(4), 0)
         }
 
-        // إطار التحديد منفصل فوق البطاقة حتى لا يأكل من مساحة الصورة الداخلية عند التكبير
         val borderOverlay = View(this).apply {
             background = solidCard(
                 Color.TRANSPARENT,
@@ -1422,7 +1397,6 @@ class MainActivity : Activity() {
         }
 
         if (banner != null) {
-            // الصورة تملأ البطاقة بالكامل 100% بدون هوامش داخلية تقصها
             tile.addView(ImageView(this).apply {
                 setImageDrawable(banner)
                 scaleType = ImageView.ScaleType.CENTER_CROP
