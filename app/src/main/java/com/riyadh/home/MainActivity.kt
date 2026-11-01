@@ -52,6 +52,132 @@ import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
 
+/* ───────────────────────── بيانات المدن والطقس والصلاة والمباريات ───────────────────────── */
+class WmCity(val name: String, val lat: Double, val lon: Double, val cc: String)
+
+object WmCities {
+    val all = listOf(
+        WmCity("الرياض", 24.7136, 46.6753, "SA"),
+        WmCity("مكة المكرمة", 21.3891, 39.8579, "SA"),
+        WmCity("المدينة المنورة", 24.4539, 39.6133, "SA"),
+        WmCity("جدة", 21.5433, 39.1728, "SA"),
+        WmCity("الدمام", 26.4207, 50.0888, "SA"),
+        WmCity("تبوك", 28.3835, 36.5662, "SA"),
+        WmCity("أبها", 18.2164, 42.5053, "SA"),
+        WmCity("بريدة", 26.3260, 43.9750, "SA")
+    )
+    val saudi = all
+    val arab = listOf(
+        WmCity("دبي", 25.2048, 55.2708, "AE"),
+        WmCity("الدوحة", 25.2854, 51.5310, "QA"),
+        WmCity("الكويت", 29.3759, 47.9774, "KW"),
+        WmCity("القاهرة", 30.0444, 31.2357, "EG"),
+        WmCity("عمان", 31.9454, 35.9284, "JO")
+    )
+    val world = listOf(
+        WmCity("لندن", 51.5074, -0.1278, "GB"),
+        WmCity("باريس", 48.8566, 2.3522, "FR"),
+        WmCity("نيويورك", 40.7128, -74.0060, "US")
+    )
+    fun countryName(cc: String) = when (cc) {
+        "SA" -> "السعودية"
+        "AE" -> "الإمارات"
+        "QA" -> "قطر"
+        "KW" -> "الكويت"
+        "EG" -> "مصر"
+        "JO" -> "الأردن"
+        else -> cc
+    }
+    fun parse(s: String): WmCity? {
+        val p = s.split(",")
+        return if (p.size >= 4) WmCity(p[0], p[1].toDoubleOrNull() ?: 24.7, p[2].toDoubleOrNull() ?: 46.6, p[3]) else null
+    }
+    fun encode(c: WmCity) = "${c.name},${c.lat},${c.lon},${c.cc}"
+}
+
+class WmPrayer(val name: String, val time: LocalTime)
+
+object WmNet {
+    class Hit(val city: WmCity, val sub: String)
+    fun search(q: String): List<Hit> {
+        val url = "https://geocoding-api.open-meteo.com/v1/search?name=" + URLEncoder.encode(q, "UTF-8") + "&count=10&language=ar"
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.connectTimeout = 6000; conn.readTimeout = 6000
+        val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+        val arr = json.optJSONArray("results") ?: return emptyList()
+        val list = mutableListOf<Hit>()
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            val name = o.optString("name", q)
+            val country = o.optString("country", "")
+            val lat = o.optDouble("latitude", 24.7)
+            val lon = o.optDouble("longitude", 46.6)
+            val cc = o.optString("country_code", "SA")
+            list.add(Hit(WmCity(name, lat, lon, cc), country))
+        }
+        return list
+    }
+    class WeatherInfo(val temp: Int, val feels: Int, val humidity: Int, val wind: Int, val status: String)
+    fun weather(c: WmCity): WeatherInfo {
+        val url = "https://api.open-meteo.com/v1/forecast?latitude=${c.lat}&longitude=${c.lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m"
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.connectTimeout = 6000; conn.readTimeout = 6000
+        val cur = JSONObject(conn.inputStream.bufferedReader().use { it.readText() }).getJSONObject("current")
+        val code = cur.optInt("weather_code", 0)
+        val st = when (code) {
+            0 -> "صو صافٍ ☀️"
+            1, 2, 3 -> "غائم جزئياً 🌤️"
+            45, 48 -> "ضباب 🌫️"
+            51, 53, 55, 56, 57 -> "رذاذ 🌦️"
+            61, 63, 65, 66, 67 -> "أمطار 🌧️"
+            71, 73, 75, 77 -> "ثلوج ❄️"
+            95, 96, 99 -> "عواصف رعدية ⚡"
+            else -> "مستقر 🌤️"
+        }
+        return WeatherInfo(
+            cur.optDouble("temperature_2m", 25.0).toInt(),
+            cur.optDouble("apparent_temperature", 25.0).toInt(),
+            cur.optInt("relative_humidity_2m", 40),
+            cur.optDouble("wind_speed_10m", 10.0).toInt(),
+            st
+        )
+    }
+    fun prayers(c: WmCity): List<WmPrayer> {
+        val today = LocalDate.now().format(DateTimeFormatter.ofPattern("dd-MM-yyyy"))
+        val url = "https://api.aladhan.com/v1/timings/$today?latitude=${c.lat}&longitude=${c.lon}&method=4"
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.connectTimeout = 6000; conn.readTimeout = 6000
+        val t = JSONObject(conn.inputStream.bufferedReader().use { it.readText() }).getJSONObject("data").getJSONObject("timings")
+        val fmt = DateTimeFormatter.ofPattern("HH:mm")
+        fun p(key: String) = LocalTime.parse(t.optString(key, "00:00").substringBefore(" "), fmt)
+        return listOf(
+            WmPrayer("الفجر", p("Fajr")),
+            WmPrayer("الشروق", p("Sunrise")),
+            WmPrayer("الظهر", p("Dhuhr")),
+            WmPrayer("العصر", p("Asr")),
+            WmPrayer("المغرب", p("Maghrib")),
+            WmPrayer("العشاء", p("Isha"))
+        )
+    }
+}
+
+class Match(val home: String, val away: String, val homeLogo: String, val awayLogo: String, val center: String, val live: Boolean, val note: String, val league: String, val time: ZonedDateTime)
+
+object Data {
+    val cities = WmCities.all
+    fun weather(c: WmCity) = WmNet.weather(c)
+    fun prayers(c: WmCity) = WmNet.prayers(c)
+    fun matches(): List<Match> {
+        val now = ZonedDateTime.now(ZoneId.of("Asia/Riyadh"))
+        return listOf(
+            Match("الهلال", "النصر", "", "", "1 - 0", true, "الدقيقة 75", "دوري روشن السعودي", now.minusMinutes(75)),
+            Match("الاتحاد", "الأهلي", "", "", "2 - 1", true, "الشوط الثاني", "دوري روشن السعودي", now.minusMinutes(50)),
+            Match("ريال مدريد", "برشلونة", "", "", "س 10:00", false, "", "الدوري الإسباني", now.plusHours(3)),
+            Match("مانشستر سيتي", "ليفربول", "", "", "س 8:30", false, "", "الدوري الإنجليزي", now.plusHours(1))
+        )
+    }
+}
+
 /* ───────────────────────── خلفية متحركة ───────────────────────── */
 class AmbientView(c: Context, initial: Int) : View(c) {
     private var color = initial
@@ -115,28 +241,13 @@ class AmbientView(c: Context, initial: Int) : View(c) {
         val dx = Math.sin(phase.toDouble()).toFloat() * w * 0.02f
         val dy = Math.cos(phase.toDouble()).toFloat() * h * 0.02f
 
-        paint.shader = LinearGradient(
-            0f, 0f, w, h,
-            base,
-            floatArrayOf(0f, 0.5f, 1f),
-            Shader.TileMode.CLAMP
-        )
+        paint.shader = LinearGradient(0f, 0f, w, h, base, floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP)
         cv.drawRect(0f, 0f, w, h, paint)
 
-        paint.shader = RadialGradient(
-            w * 0.25f + dx, h * 0.15f + dy, w * 0.6f,
-            intArrayOf(Color.argb(90, r, g, b), Color.TRANSPARENT),
-            null,
-            Shader.TileMode.CLAMP
-        )
+        paint.shader = RadialGradient(w * 0.25f + dx, h * 0.15f + dy, w * 0.6f, intArrayOf(Color.argb(90, r, g, b), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
         cv.drawRect(0f, 0f, w, h, paint)
 
-        paint.shader = RadialGradient(
-            w * 0.85f - dx, h * 0.2f - dy, w * 0.5f,
-            intArrayOf(Color.argb(70, r, g, b), Color.TRANSPARENT),
-            null,
-            Shader.TileMode.CLAMP
-        )
+        paint.shader = RadialGradient(w * 0.85f - dx, h * 0.2f - dy, w * 0.5f, intArrayOf(Color.argb(70, r, g, b), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
         cv.drawRect(0f, 0f, w, h, paint)
     }
 }
@@ -163,28 +274,16 @@ class GlassDrawable(
         val bt = b.bottom.toFloat()
         val h = bt - t
         fill.shader = LinearGradient(0f, t, 0f, bt, fillTop, fillBot, Shader.TileMode.CLAMP)
-        sheen.shader = LinearGradient(
-            0f, t, 0f, t + h * 0.55f,
-            Color.argb(sheenA, 255, 255, 255), Color.argb(0, 255, 255, 255),
-            Shader.TileMode.CLAMP
-        )
+        sheen.shader = LinearGradient(0f, t, 0f, t + h * 0.55f, Color.argb(sheenA, 255, 255, 255), Color.argb(0, 255, 255, 255), Shader.TileMode.CLAMP)
         line.strokeWidth = strokePx
         val r = Color.red(borderColor)
         val g = Color.green(borderColor)
         val bl = Color.blue(borderColor)
         val a = Color.alpha(borderColor)
         line.shader = if (solidBorder) {
-            LinearGradient(
-                b.left.toFloat(), t, b.right.toFloat(), bt,
-                intArrayOf(Color.argb(a, r, g, bl), Color.argb((a * 0.9f).toInt(), r, g, bl), Color.argb(a, r, g, bl)),
-                floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP
-            )
+            LinearGradient(b.left.toFloat(), t, b.right.toFloat(), bt, intArrayOf(Color.argb(a, r, g, bl), Color.argb((a * 0.9f).toInt(), r, g, bl), Color.argb(a, r, g, bl)), floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP)
         } else {
-            LinearGradient(
-                b.left.toFloat(), t, b.right.toFloat(), bt,
-                intArrayOf(Color.argb(a, r, g, bl), Color.argb((a * 0.22f).toInt(), r, g, bl), Color.argb((a * 0.65f).toInt(), r, g, bl)),
-                floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP
-            )
+            LinearGradient(b.left.toFloat(), t, b.right.toFloat(), bt, intArrayOf(Color.argb(a, r, g, bl), Color.argb((a * 0.22f).toInt(), r, g, bl), Color.argb((a * 0.65f).toInt(), r, g, bl)), floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
         }
     }
 
@@ -208,8 +307,7 @@ class GlassDrawable(
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 }
 
-/* ───────────────────────── شعار WM ─────────────────────────
-   حرف W (وليد) ينعكس في مرآة ذهبية فيتحول إلى M (الواجهة) */
+/* ───────────────────────── شعار WM ───────────────────────── */
 class LogoView(c: Context) : View(c) {
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
     private val path = Path()
@@ -1128,1119 +1226,4 @@ class MainActivity : Activity() {
             addView(col)
         }
     }
-
-    class GlyphView(c: Context, private val kind: Int) : View(c) {
-        private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; strokeCap = Paint.Cap.ROUND }
-        fun setTint(c: Int) {
-            p.color = c
-            invalidate()
-        }
-        override fun onDraw(cv: Canvas) {
-            super.onDraw(cv)
-            val d = resources.displayMetrics.density
-            val cx = width / 2f
-            val cy = height / 2f
-            when (kind) {
-                0 -> {
-                    p.style = Paint.Style.STROKE
-                    p.strokeWidth = 2.2f * d
-                    for (r in listOf(4.2f, 7.5f, 10.8f)) cv.drawArc(cx - r * d, cy + 5 * d - r * d, cx + r * d, cy + 5 * d + r * d, 225f, 90f, false, p)
-                    p.style = Paint.Style.FILL
-                    cv.drawCircle(cx, cy + 5 * d, 1.6f * d, p)
-                }
-                1 -> {
-                    p.style = Paint.Style.FILL
-                    val path = Path()
-                    val big = 9.5f * d
-                    val small = 7.2f * d
-                    for (k in 0 until 8) {
-                        for ((a, rad) in listOf(-11f to small, -7f to big, 7f to big, 11f to small)) {
-                            val ang = Math.toRadians((k * 45 + a).toDouble())
-                            val x = cx + rad * Math.cos(ang).toFloat()
-                            val y = cy + rad * Math.sin(ang).toFloat()
-                            if (k == 0 && a == -11f) path.moveTo(x, y) else path.lineTo(x, y)
-                        }
-                    }
-                    path.close()
-                    path.fillType = Path.FillType.EVEN_ODD
-                    path.addCircle(cx, cy, 3.4f * d, Path.Direction.CW)
-                    cv.drawPath(path, p)
-                }
-                else -> {
-                    p.style = Paint.Style.STROKE
-                    p.strokeWidth = 2.0f * d
-                    cv.drawCircle(cx, cy - 2.5f * d, 5f * d, p)
-                    cv.drawLine(cx - 3.8f * d, cy + 1f * d, cx, cy + 8.5f * d, p)
-                    cv.drawLine(cx + 3.8f * d, cy + 1f * d, cx, cy + 8.5f * d, p)
-                    p.style = Paint.Style.FILL
-                    cv.drawCircle(cx, cy - 2.5f * d, 1.8f * d, p)
-                }
-            }
-        }
-    }
-
-    private fun sunView(): View = object : View(this) {
-        private val p = Paint(Paint.ANTI_ALIAS_FLAG)
-        override fun onDraw(c: Canvas) {
-            super.onDraw(c)
-            val cx = width / 2f
-            val cy = height / 2f
-            p.style = Paint.Style.FILL
-            p.color = Color.parseColor("#FFB703")
-            c.drawCircle(cx, cy, width * 0.28f, p)
-            p.style = Paint.Style.STROKE
-            p.strokeWidth = 2f
-            p.strokeCap = Paint.Cap.ROUND
-            for (i in 0 until 8) {
-                val a = Math.toRadians((i * 45).toDouble())
-                val r1 = width * 0.36f
-                val r2 = width * 0.46f
-                c.drawLine(cx + r1 * Math.cos(a).toFloat(), cy + r1 * Math.sin(a).toFloat(), cx + r2 * Math.cos(a).toFloat(), cy + r2 * Math.sin(a).toFloat(), p)
-            }
-        }
-    }
-
-    /* ─────────── صفحة إعدادات WM Launcher ─────────── */
-    private val sectionNames = listOf("عام", "المظهر", "اللغة والأرقام", "التطبيقات", "الريموت", "الطقس", "المباريات", "أوقات الصلاة", "حول والتحديث")
-    private val sectionIcons = listOf("🏠", "🎨", "🌐", "📱", "🎮", "☀️", "⚽", "🕌", "ℹ️")
-    private val sectionSubs = listOf(
-        "الإعدادات الأساسية واختصارات النظام",
-        "الألوان والزجاج والحدود والتحديد",
-        "لغة التاريخ ونوع الأرقام والساعة",
-        "المفضلة وجميع التطبيقات وآخر المستخدم",
-        "أزرار الريموت والاختصارات",
-        "المدينة ووحدة الحرارة والتحديث",
-        "مباريات اليوم وبطاقات الرئيسية",
-        "أوقات الصلاة والعد التنازلي",
-        "الإصدار والتحديث من الواجهة نفسها"
-    )
-
-    private fun buildSettingsPage(): View {
-        val page = LinearLayout(this).unclip().apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutDirection = View.LAYOUT_DIRECTION_RTL
-            setPadding(dp(4), dp(4), dp(4), dp(8))
-        }
-
-        // الشريط الجانبي: الشعار والاسم والأقسام
-        val side = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = slateGlass(220, 28, Color.argb(45, 255, 255, 255), 1)
-            setPadding(dp(14), dp(14), dp(14), dp(10))
-            roundOutline(28)
-        }
-        val brand = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(6), dp(2), dp(6), dp(12))
-        }
-        brand.addView(LogoView(this), LinearLayout.LayoutParams(dp(46), dp(46)))
-        val brandText = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), 0, 0, 0)
-        }
-        brandText.addView(tv(17f, true).apply { text = "WM Launcher"; layoutDirection = View.LAYOUT_DIRECTION_LTR })
-        brandText.addView(tv(10.5f, false, muted).apply { text = "واجهة وليد" })
-        brand.addView(brandText)
-        side.addView(brand)
-
-        val navList = mutableListOf<LinearLayout>()
-        val navBox = LinearLayout(this).unclip().apply { orientation = LinearLayout.VERTICAL }
-        sectionNames.forEachIndexed { i, n ->
-            val ic = tv(14f).apply { text = sectionIcons[i]; setPadding(0, 0, dp(10), 0) }
-            val tx = tv(13f, true).apply { text = n }
-            val item = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(14), dp(9), dp(14), dp(9))
-                isFocusable = true
-                isClickable = true
-                roundOutline(18)
-                addView(ic)
-                addView(tx)
-                background = slateGlass(130, 18, Color.argb(30, 255, 255, 255), 1)
-                setOnClickListener { settingsContent.getChildAt(firstFocusableRow())?.requestFocus() }
-                setOnFocusChangeListener { v, f ->
-                    if (f && currentSection != i) showSection(i)
-                    styleNav()
-                    v.animate().scaleX(if (f) 1.03f else 1f).scaleY(if (f) 1.03f else 1f).setDuration(120).start()
-                }
-            }
-            navList.add(item)
-            navBox.addView(item, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
-        }
-        settingsNav = navList
-        side.addView(ScrollView(this).apply {
-            isVerticalScrollBarEnabled = false
-            addView(navBox)
-        }, LinearLayout.LayoutParams(-1, 0, 1f))
-        page.addView(side, LinearLayout.LayoutParams(dp(250), -1))
-
-        // المحتوى
-        val content = LinearLayout(this).unclip().apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(8), dp(4), dp(8), 0)
-        }
-        settingsTitleTv = tv(26f, true).apply { text = sectionNames[0] }
-        settingsSubTv = tv(12f, false, dim).apply { setPadding(0, dp(2), 0, dp(12)) }
-        content.addView(settingsTitleTv)
-        content.addView(settingsSubTv)
-        settingsContent = LinearLayout(this).unclip().apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(6), dp(4), dp(6), dp(30))
-        }
-        settingsScroll = ScrollView(this).unclip().apply {
-            isVerticalScrollBarEnabled = false
-            addView(settingsContent)
-        }
-        content.addView(settingsScroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        page.addView(content, LinearLayout.LayoutParams(0, -1, 1f).apply { marginStart = dp(16) })
-
-        showSection(currentSection.coerceIn(0, sectionNames.size - 1))
-        return page
-    }
-
-    private fun styleNav() {
-        if (!::settingsNav.isInitialized) return
-        settingsNav.forEachIndexed { i, item ->
-            val f = item.hasFocus()
-            val sel = i == currentSection
-            val tx = item.getChildAt(1) as TextView
-            when {
-                f -> { item.background = focusBg(18); tx.setTextColor(focusFg()) }
-                sel -> { item.background = slateGlass(220, 18, accent, 1); tx.setTextColor(accent) }
-                else -> { item.background = slateGlass(130, 18, Color.argb(30, 255, 255, 255), 1); tx.setTextColor(Color.WHITE) }
-            }
-        }
-    }
-
-    private fun firstFocusableRow(): Int {
-        for (i in 0 until settingsContent.childCount) if (settingsContent.getChildAt(i).isFocusable) return i
-        return 0
-    }
-
-    private fun showSection(i: Int) {
-        currentSection = i
-        settingsTitleTv.text = sectionNames[i]
-        settingsSubTv.text = sectionSubs[i]
-        settingsContent.removeAllViews()
-        updateSubTv = null
-        when (i) {
-            0 -> buildGeneral()
-            1 -> buildAppearance()
-            2 -> buildLanguage()
-            3 -> buildAppsSection()
-            4 -> buildRemote()
-            5 -> buildWeatherSection()
-            6 -> buildMatchesSection()
-            7 -> buildPrayerSection()
-            else -> buildAbout()
-        }
-        settingsScroll.scrollTo(0, 0)
-        styleNav()
-    }
-
-    private fun refreshSection() {
-        val row = lastFocusedRow
-        showSection(currentSection)
-        settingsContent.post { settingsContent.getChildAt(row.coerceIn(0, maxOf(0, settingsContent.childCount - 1)))?.requestFocus() }
-    }
-
-    /* ─────────── أدوات صفوف الإعدادات ─────────── */
-    private fun rowLp() = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) }
-
-    private fun groupTitle(text: String) {
-        settingsContent.addView(tv(12f, true, accent).apply {
-            this.text = text
-            setPadding(dp(6), dp(10), dp(6), dp(6))
-        }, LinearLayout.LayoutParams(-1, -2))
-    }
-
-    private fun makeRow(title: String, sub: String?, trailing: View?, valueTv: TextView?, onKey: ((Int) -> Boolean)? = null): LinearLayout {
-        val titleTv = tv(14.5f, true).apply { text = title }
-        val subTv = tv(11f, false, dim).apply { text = sub ?: ""; visibility = if (sub == null) View.GONE else View.VISIBLE }
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutDirection = View.LAYOUT_DIRECTION_RTL
-            gravity = Gravity.CENTER_VERTICAL
-            background = slateGlass(170, 18, Color.argb(40, 255, 255, 255), 1)
-            setPadding(dp(18), dp(12), dp(18), dp(12))
-            isFocusable = true
-            isClickable = true
-            roundOutline(18)
-        }
-        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        texts.addView(titleTv)
-        texts.addView(subTv)
-        row.addView(texts, LinearLayout.LayoutParams(0, -2, 1f))
-        if (trailing != null) row.addView(trailing, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(14) })
-        row.setOnFocusChangeListener { v, f ->
-            v.background = if (f) focusBg(18) else slateGlass(170, 18, Color.argb(40, 255, 255, 255), 1)
-            titleTv.setTextColor(if (f) focusFg() else Color.WHITE)
-            subTv.setTextColor(if (f) focusFg() else dim)
-            valueTv?.setTextColor(if (f) focusFg() else accent)
-            v.animate().scaleX(if (f) 1.015f else 1f).scaleY(if (f) 1.015f else 1f).setDuration(110).start()
-            if (f) lastFocusedRow = settingsContent.indexOfChild(v)
-        }
-        if (onKey != null) {
-            row.setOnKeyListener { _, code, ev -> if (ev.action == KeyEvent.ACTION_DOWN) onKey(code) else false }
-        }
-        if (row.parent == null) settingsContent.addView(row, rowLp())
-        if (updateSubTv == null && title == "تحديث الآن") updateSubTv = subTv
-        return row
-    }
-
-    private fun addToggle(title: String, sub: String?, key: String, def: Boolean, rebuild: Boolean = false, after: (() -> Unit)? = null) {
-        val sw = SwitchView(this).apply { on = pBool(key, def); onColor = accent }
-        val row = makeRow(title, sub, sw, null)
-        row.setOnClickListener {
-            val nv = !pBool(key, def)
-            putBool(key, nv)
-            sw.on = nv
-            sw.invalidate()
-            after?.invoke()
-            if (rebuild) scheduleRebuild()
-        }
-    }
-
-    private fun addChoice(title: String, sub: String?, key: String, options: List<String>, def: Int, rebuild: Boolean = false, after: (() -> Unit)? = null) {
-        val valueTv = tv(13f, true, accent).apply { text = options[pInt(key, def).coerceIn(0, options.size - 1)] }
-        val row = makeRow(title, sub, valueTv, valueTv)
-        row.setOnClickListener {
-            val cur = pInt(key, def)
-            showDropdown(row, title, options.mapIndexed { i, o ->
-                DropItem(o, null, i == cur) {
-                    putInt(key, i)
-                    valueTv.text = o
-                    after?.invoke()
-                    if (rebuild) scheduleRebuild()
-                }
-            })
-        }
-    }
-
-    private fun addSlider(title: String, sub: String?, key: String, min: Int, max: Int, step: Int, def: Int, rebuild: Boolean = false, after: (() -> Unit)? = null) {
-        val bar = BarView(this).apply { barColor = accent }
-        val valTv = tv(13f, true, accent).apply { gravity = Gravity.CENTER }
-        fun cur() = pInt(key, def).coerceIn(min, max)
-        fun refresh() {
-            bar.frac = (cur() - min).toFloat() / (max - min).toFloat()
-            bar.invalidate()
-            valTv.text = "${cur()}%"
-        }
-        fun setV(v: Int) {
-            val nv = v.coerceIn(min, max)
-            if (nv == cur()) return
-            putInt(key, nv)
-            refresh()
-            after?.invoke()
-            if (rebuild) scheduleRebuild()
-        }
-        refresh()
-        val trailing = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutDirection = View.LAYOUT_DIRECTION_LTR
-            gravity = Gravity.CENTER_VERTICAL
-            addView(bar, LinearLayout.LayoutParams(dp(150), dp(22)))
-            addView(valTv, LinearLayout.LayoutParams(dp(54), -2).apply { marginStart = dp(8) })
-        }
-        val row = makeRow(title, sub, trailing, valTv) { code ->
-            when (code) {
-                KeyEvent.KEYCODE_DPAD_LEFT -> { setV(cur() - step); true }
-                KeyEvent.KEYCODE_DPAD_RIGHT -> { setV(cur() + step); true }
-                else -> false
-            }
-        }
-        row.setOnClickListener { if (cur() + step > max) setV(min) else setV(cur() + step) }
-    }
-
-    private fun addAction(title: String, sub: String?, value: String? = null, onClick: (View) -> Unit) {
-        val valueTv = if (value != null) tv(12.5f, true, accent).apply { text = value; maxLines = 1; ellipsize = TextUtils.TruncateAt.END; maxWidth = dp(260) } else null
-        val row = makeRow(title, sub, valueTv, valueTv)
-        row.setOnClickListener { onClick(row) }
-    }
-
-    private fun addInfo(text: String) {
-        settingsContent.addView(tv(11.5f, false, muted).apply {
-            this.text = text
-            setPadding(dp(8), dp(2), dp(8), dp(8))
-            setLineSpacing(0f, 1.15f)
-        }, LinearLayout.LayoutParams(-1, -2))
-    }
-
-    private fun refreshAllTexts() {
-        lastMin = -1
-        updateClock()
-        applyWeather()
-        renderPrayers()
-        renderMatches()
-    }
-
-    /* ─────────── الأقسام ─────────── */
-    private fun buildGeneral() {
-        groupTitle("البداية")
-        addChoice("الشاشة الافتراضية", "الصفحة التي تفتح عند تشغيل الواجهة", "start_page", listOf("الرئيسية", "المباريات"), 0)
-        addToggle("رسالة الترحيب", "إظهار «مساء الخير» فوق الساعة", "show_greeting", true, rebuild = true)
-        groupTitle("اختصارات النظام")
-        addAction("الواي فاي", "الشبكة والاتصال") { go(Intent(Settings.ACTION_WIFI_SETTINGS)) }
-        addAction("إعدادات النظام", "إعدادات الجهاز الأساسية") { go(Intent(Settings.ACTION_SETTINGS)) }
-        addAction("الصورة والشاشة", "العرض والدقة") { go(Intent(Settings.ACTION_DISPLAY_SETTINGS)) }
-        addAction("الصوت", "مستوى الصوت والمخرجات") { go(Intent(Settings.ACTION_SOUND_SETTINGS)) }
-        addAction("شاشة التوقف", "حافظة الشاشة") { go(Intent(Settings.ACTION_DREAM_SETTINGS)) }
-    }
-
-    private fun buildAppearance() {
-        groupTitle("الخلفية")
-        addChoice("ألوان الخلفية", "لون الواجهة العام", "bg_palette", palettes.map { it.first }, 0, rebuild = true)
-        addChoice("لون التمييز", "العناوين والمفاتيح والعناصر الملونة", "accent_idx", accents.map { it.first }, 0, rebuild = true)
-        addChoice("لون الزجاج", "محايد أو مائل للون التمييز", "glass_tint", listOf("محايد", "مائل للون التمييز"), 0, rebuild = true)
-        addAction("صورة خلفية خاصة", "رابط صورة مباشر (HTTPS)", prefs.getString("custom_bg_url", "")?.takeIf { it.isNotEmpty() }?.let { "مفعّلة" }) { showBgUrlDialog() }
-        addAction("استعادة الخلفية الافتراضية", "إلغاء الصورة الخاصة") {
-            prefs.edit().remove("custom_bg_url").apply()
-            applyCustomBackground()
-            refreshSection()
-        }
-        groupTitle("الزجاج والحدود")
-        addSlider("نسبة الشفافية", "كلما زادت صارت اللوحات أشفّ", "panel_clear", 0, 100, 10, 30, rebuild = true)
-        addChoice("نمط الحدود", "زجاجي: حد متدرج ولمعة • حاد: خط واضح بلا لمعة", "border_style", listOf("زجاجي", "حاد"), 0, rebuild = true)
-        addSlider("قوة الحدود", "وضوح خط الحد حول اللوحات والبطاقات", "border_strength", 0, 100, 10, 50, rebuild = true)
-        groupTitle("التحديد (التركيز)")
-        addChoice("نمط التحديد", "حاد: أبيض صلب • زجاجي: أبيض شفاف بحد لامع", "focus_style", listOf("حاد", "زجاجي"), 0, rebuild = true)
-        addSlider("نسبة التحديد الزجاجي", "تؤثر عند اختيار النمط الزجاجي", "focus_glass", 10, 100, 10, 60, rebuild = true)
-        addChoice("حجم التكبير عند التحديد", null, "focus_scale", listOf("خفيف", "متوسط", "كبير"), 1)
-    }
-
-    private fun buildLanguage() {
-        groupTitle("التاريخ والأيام")
-        addChoice("لغة التاريخ والأيام", "أسماء الأيام والشهور والترحيب", "date_lang", listOf("العربية", "English"), 0) { refreshAllTexts() }
-        addToggle("التاريخ الهجري", "إظهاره تحت التاريخ الميلادي", "show_hijri", true) { refreshAllTexts() }
-        groupTitle("الأرقام والساعة")
-        addChoice("نوع الأرقام", "تلقائي يترك الأرقام كما هي", "digits", listOf("تلقائي", "هندية ٠١٢", "إنجليزية 012"), 0) { refreshAllTexts() }
-        addChoice("نظام الساعة", null, "clock_mode", listOf("24 ساعة", "12 ساعة"), 0) { refreshAllTexts() }
-    }
-
-    private fun buildAppsSection() {
-        groupTitle("الوصول السريع")
-        addAction("آخر التطبيقات استخدام", "قائمة التطبيقات التي فُتحت مؤخراً في النظام") { showRecentsPanel() }
-        addAction("جميع التطبيقات (النظام)", "إدارة التطبيقات من إعدادات الجهاز") { go(Intent(Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS)) }
-        groupTitle("الرئيسية")
-        addChoice("عدد تطبيقات المفضلة الظاهرة", "في صف المفضلة", "fav_cols", listOf("4", "5", "6"), 1, rebuild = true)
-        addToggle("إظهار جميع التطبيقات تحت المفضلة", "تنزل تحت المفضلة وتشوفها كاملة", "show_all_apps", true, rebuild = true)
-        addChoice("أعمدة جميع التطبيقات", null, "grid_cols", listOf("4", "5", "6"), 1, rebuild = true)
-        groupTitle("المفضلة")
-        addAction("إعادة ضبط المفضلة", "الترتيب الافتراضي") {
-            prefs.edit().remove("fav_apps").apply()
-            loadAppsAndDock()
-            Toast.makeText(this, "تمت إعادة الضبط ✓", Toast.LENGTH_SHORT).show()
-        }
-        addInfo("لتحريك تطبيق في المفضلة: اضغط مطولاً عليه ثم اختر «تحريك المكان».")
-    }
-
-    private fun colorKeyRow(title: String, key: String) {
-        val cur = prefs.getString(key, "") ?: ""
-        addAction(title, "يفتح التطبيق المحدد من الريموت", if (cur.isEmpty()) "غير محدد" else appLabel(cur)) { row ->
-            val items = mutableListOf(DropItem("بدون تعيين", null, cur.isEmpty()) {
-                prefs.edit().remove(key).apply()
-                refreshSection()
-            })
-            for (a in allApps) {
-                val p = a.activityInfo.packageName
-                items.add(DropItem(a.loadLabel(packageManager).toString(), null, p == cur) {
-                    prefs.edit().putString(key, p).apply()
-                    refreshSection()
-                })
-            }
-            showDropdown(row, title, items, 320)
-        }
-    }
-
-    private fun buildRemote() {
-        groupTitle("الأزرار")
-        addToggle("حظر أزرار TV / Guide / DVR", "تمنع فتح واجهات النظام الأخرى من الريموت", "block_keys", true)
-        addToggle("زر القائمة (Menu)", "يفتح إعدادات WM Launcher", "menu_key", true)
-        groupTitle("الأزرار الملونة")
-        colorKeyRow("الزر الأحمر", "key_red")
-        colorKeyRow("الزر الأخضر", "key_green")
-        colorKeyRow("الزر الأصفر", "key_yellow")
-        colorKeyRow("الزر الأزرق", "key_blue")
-        addInfo("الأزرار الملونة تعمل فقط في الريموتات التي فيها أزرار ملونة.")
-    }
-
-    private fun buildWeatherSection() {
-        groupTitle("الموقع")
-        addAction("المدينة", "تُستخدم للطقس والصلاة", city().name) { openCityPicker(it) }
-        addAction("بحث يدوي عن مدينة", "أي مدينة في العالم من الشبكة") { manualCitySearch(it) }
-        groupTitle("العرض")
-        addToggle("إظهار الطقس في الرئيسية", null, "show_weather", true, rebuild = true)
-        addChoice("وحدة الحرارة", null, "temp_unit", listOf("مئوية °C", "فهرنهايت °F"), 0) { applyWeather() }
-        addToggle("التفاصيل (الرطوبة والرياح)", "تحت درجة الحرارة", "weather_details", true) { applyWeather() }
-        groupTitle("التحديث")
-        addChoice("تحديث تلقائي كل", null, "refresh_idx", listOf("15 دقيقة", "30 دقيقة", "ساعة"), 0) { refreshFeeds() }
-        addAction("تحديث الآن", null) {
-            refreshFeeds()
-            Toast.makeText(this, "جاري التحديث…", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun buildMatchesSection() {
-        groupTitle("الرئيسية")
-        addToggle("إظهار مباريات اليوم", null, "show_matches", true, rebuild = true)
-        addChoice("عدد البطاقات", null, "match_count", listOf("5", "8", "12", "الكل"), 3) { renderMatches() }
-        addToggle("الشريط المتحرك للنتائج", null, "show_ticker", true, rebuild = true)
-        groupTitle("التصفية")
-        addToggle("إخفاء المباريات المنتهية", null, "hide_finished", false) { renderMatches() }
-        groupTitle("التحديث")
-        addAction("تحديث المباريات الآن", null) {
-            fetchMatches()
-            Toast.makeText(this, "جاري التحديث…", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun buildPrayerSection() {
-        groupTitle("العرض")
-        addToggle("إظهار أوقات الصلاة", "في اللوحة الرئيسية", "show_prayers", true, rebuild = true)
-        addToggle("العد التنازلي للأذان القادم", null, "prayer_countdown", true, rebuild = true)
-        groupTitle("الموقع")
-        addAction("المدينة", "تُحسب الأوقات حسب المدينة", city().name) { openCityPicker(it) }
-        addInfo("نظام الساعة (12/24) من قسم «اللغة والأرقام».")
-    }
-
-    private fun versionInfo(): Pair<String, Int> = try {
-        val pi = packageManager.getPackageInfo(packageName, 0)
-        @Suppress("DEPRECATION")
-        val code = if (Build.VERSION.SDK_INT >= 28) pi.longVersionCode.toInt() else pi.versionCode
-        (pi.versionName ?: "1.0") to code
-    } catch (e: Throwable) { "1.0" to 1 }
-
-    private fun buildAbout() {
-        val (vn, vc) = versionInfo()
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutDirection = View.LAYOUT_DIRECTION_RTL
-            gravity = Gravity.CENTER_VERTICAL
-            background = slateGlass(190, 22, Color.argb(50, 255, 255, 255), 1)
-            setPadding(dp(20), dp(16), dp(20), dp(16))
-        }
-        card.addView(LogoView(this), LinearLayout.LayoutParams(dp(72), dp(72)))
-        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), 0, 0, 0) }
-        col.addView(tv(22f, true).apply { text = "WM Launcher"; layoutDirection = View.LAYOUT_DIRECTION_LTR })
-        col.addView(tv(12f, false, dim).apply { text = nd("الإصدار $vn (رقم $vc)") })
-        col.addView(tv(11f, false, muted).apply { text = "واجهة وليد • مصممة للتلفزيونات والبروجكترات"; setPadding(0, dp(3), 0, 0) })
-        card.addView(col)
-        settingsContent.addView(card, rowLp())
-
-        groupTitle("التحديث")
-        val url = prefs.getString("update_url", "") ?: ""
-        addAction("رابط التحديث", "ملف JSON أو رابط APK مباشر", if (url.isEmpty()) "غير محدد" else url.substringAfter("://").take(34)) {
-            askText("رابط التحديث", "https://example.com/update.json", url) { v ->
-                prefs.edit().putString("update_url", v.trim()).apply()
-                updateInfo = null
-                updateMsg = ""
-                refreshSection()
-            }
-        }
-        addAction("التحقق من التحديث", if (updateMsg.isEmpty()) "يفحص إذا في نسخة أحدث" else updateMsg) { checkUpdate() }
-        val info = updateInfo
-        if (info != null && (info.direct || info.code > vc)) {
-            addAction("تحديث الآن", if (downloading) "جاري التنزيل…" else (if (info.notes.isNotEmpty()) info.notes else "تنزيل وتثبيت ${info.name}")) {
-                if (!downloading) downloadAndInstall(info)
-            }
-        }
-        groupTitle("إعادة الضبط")
-        addAction("إعادة ضبط كل الإعدادات", "يرجّع المظهر والخيارات (يبقي المفضلة والمدينة والرابط)") {
-            val keep = setOf("fav_apps", "city_idx", "city_custom", "update_url", "custom_bg_url")
-            val ed = prefs.edit()
-            for (k in prefs.all.keys) if (k !in keep) ed.remove(k)
-            ed.apply()
-            scheduleRebuild()
-        }
-    }
-
-    /* ─────────── القوائم المنسدلة (تحت الزر) ─────────── */
-    private class DropItem(val label: String, val sub: String? = null, val selected: Boolean = false, val onClick: () -> Unit)
-
-    private fun dropRow(item: DropItem, d: Dialog): View {
-        val t = tv(14.5f, true).apply { text = (if (item.selected) "✓  " else "") + item.label }
-        val s = tv(10.5f, false, dim).apply { text = item.sub ?: ""; visibility = if (item.sub == null) View.GONE else View.VISIBLE }
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = slateGlass(150, 16, Color.argb(35, 255, 255, 255), 1)
-            setPadding(dp(16), dp(11), dp(16), dp(11))
-            isFocusable = true
-            isClickable = true
-            addView(t)
-            addView(s)
-            setOnClickListener { d.dismiss(); item.onClick() }
-            setOnFocusChangeListener { v, f ->
-                v.background = if (f) focusBg(16) else slateGlass(150, 16, Color.argb(35, 255, 255, 255), 1)
-                t.setTextColor(if (f) focusFg() else Color.WHITE)
-                s.setTextColor(if (f) focusFg() else dim)
-            }
-        }
-    }
-
-    private fun showDropdown(anchor: View?, title: String?, items: List<DropItem>, widthDp: Int = 300) {
-        val d = Dialog(this)
-        d.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        d.window?.setBackgroundDrawableResource(android.R.color.transparent)
-        val sw = resources.displayMetrics.widthPixels
-        val sh = resources.displayMetrics.heightPixels
-        var x = (sw - dp(widthDp)) / 2
-        var y = dp(80)
-        var maxH = sh - dp(160)
-        if (anchor != null) {
-            val loc = IntArray(2)
-            anchor.getLocationOnScreen(loc)
-            x = (loc[0] + anchor.width / 2 - dp(widthDp) / 2).coerceIn(dp(16), maxOf(dp(16), sw - dp(widthDp) - dp(16)))
-            y = loc[1] + anchor.height + dp(8)
-            maxH = sh - y - dp(24)
-            if (maxH < dp(220)) {
-                y = dp(24)
-                maxH = sh - dp(48)
-            }
-        }
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutDirection = View.LAYOUT_DIRECTION_RTL
-            background = slateGlass(245, 24, Color.argb(70, 255, 255, 255), 1)
-            setPadding(dp(12), dp(12), dp(12), dp(8))
-        }
-        if (title != null) panel.addView(tv(14f, true, accent).apply { text = title; setPadding(dp(8), dp(2), dp(8), dp(8)) })
-        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        var sel: View? = null
-        for (it in items) {
-            val v = dropRow(it, d)
-            list.addView(v, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
-            if (it.selected && sel == null) sel = v
-        }
-        val scroll = MaxHeightScroll(this, maxH - dp(70)).apply {
-            isVerticalScrollBarEnabled = false
-            addView(list)
-        }
-        panel.addView(scroll, LinearLayout.LayoutParams(-1, -2))
-        d.setContentView(panel, ViewGroup.LayoutParams(dp(widthDp), ViewGroup.LayoutParams.WRAP_CONTENT))
-        val win = d.window
-        if (win != null) {
-            win.setLayout(dp(widthDp), ViewGroup.LayoutParams.WRAP_CONTENT)
-            win.setGravity(Gravity.TOP or Gravity.LEFT)
-            val lp = win.attributes
-            lp.x = x
-            lp.y = y
-            lp.dimAmount = 0.4f
-            win.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-            win.attributes = lp
-        }
-        d.show()
-        (sel ?: list.getChildAt(0))?.post { (sel ?: list.getChildAt(0))?.requestFocus() }
-    }
-
-    private fun openSettingsMenu(anchor: View) {
-        showDropdown(anchor, null, listOf(
-            DropItem("⚙️  إعدادات WM Launcher", "المظهر واللغة والريموت والمزيد") { showPage(2) },
-            DropItem("🛠️  إعدادات النظام", null) { go(Intent(Settings.ACTION_SETTINGS)) },
-            DropItem("🖥️  الصورة والشاشة", null) { go(Intent(Settings.ACTION_DISPLAY_SETTINGS)) },
-            DropItem("🔊  الصوت", null) { go(Intent(Settings.ACTION_SOUND_SETTINGS)) },
-            DropItem("📱  التطبيقات", "آخر التطبيقات استخداماً") { showRecentsPanel() },
-            DropItem("🔄  التحديث وحول التطبيق", null) { showSection(8); showPage(2) }
-        ), 330)
-    }
-
-    private fun setCity(c: WmCity, idx: Int) {
-        putInt("city_idx", idx)
-        if (idx == -1) prefs.edit().putString("city_custom", WmCities.encode(c)).apply()
-        else prefs.edit().remove("city_custom").apply()
-        cityHeaderTv.text = "الطقس • ${c.name}"
-        cityPillTv.text = c.name
-        lastTemp = null
-        lastFeels = null
-        lastStatus = null
-        prayersData = emptyList()
-        applyWeather()
-        refreshFeeds()
-        if (currentPage == 2) refreshSection()
-    }
-
-    private fun isCurrent(c: WmCity): Boolean {
-        val cur = city()
-        return cur.name == c.name && Math.abs(cur.lat - c.lat) < 0.01 && Math.abs(cur.lon - c.lon) < 0.01
-    }
-
-    private fun showCityList(anchor: View?, title: String, list: List<WmCity>, showCountry: Boolean) {
-        showDropdown(anchor, title, list.map { c ->
-            DropItem(c.name, if (showCountry) WmCities.countryName(c.cc) else null, isCurrent(c)) {
-                setCity(c, WmCities.all.indexOf(c))
-            }
-        }, 320)
-    }
-
-    private fun openCityPicker(anchor: View?) {
-        showDropdown(anchor, "اختر مدينتك (الطقس والصلاة)", listOf(
-            DropItem("🇸🇦  مدن المملكة", "${WmCities.saudi.size} مدينة") { showCityList(anchor, "مدن المملكة", WmCities.saudi, false) },
-            DropItem("🌙  مدن عربية", "${WmCities.arab.size} مدينة") { showCityList(anchor, "مدن عربية", WmCities.arab, true) },
-            DropItem("🌍  مدن عالمية", "${WmCities.world.size} مدينة") { showCityList(anchor, "مدن عالمية", WmCities.world, true) },
-            DropItem("🔎  بحث يدوي (من الشبكة)", "اكتب اسم أي مدينة في العالم") { manualCitySearch(anchor) }
-        ), 330)
-    }
-
-    private fun manualCitySearch(anchor: View?) {
-        askText("بحث عن مدينة", "اكتب اسم المدينة (عربي أو إنجليزي)", "") { q ->
-            if (q.trim().length < 2) return@askText
-            Toast.makeText(this, "جاري البحث…", Toast.LENGTH_SHORT).show()
-            thread {
-                val hits = try { WmNet.search(q) } catch (e: Throwable) { null }
-                ui.post {
-                    if (hits == null) Toast.makeText(this, "تعذر البحث، تأكد من الاتصال", Toast.LENGTH_SHORT).show()
-                    else if (hits.isEmpty()) Toast.makeText(this, "ما لقيت مدينة بهذا الاسم", Toast.LENGTH_SHORT).show()
-                    else showDropdown(anchor, "نتائج البحث", hits.map { h ->
-                        DropItem(h.city.name, h.sub, isCurrent(h.city)) { setCity(h.city, -1) }
-                    }, 340)
-                }
-            }
-        }
-    }
-
-    /* ─────────── آخر التطبيقات استخداماً (النظام) ─────────── */
-    private fun hasUsageAccess(): Boolean = try {
-        val ops = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-        @Suppress("DEPRECATION")
-        val mode = ops.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName)
-        mode == AppOpsManager.MODE_ALLOWED
-    } catch (e: Throwable) { false }
-
-    private fun recentPackages(): List<Pair<String, Long>> {
-        val usm = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
-        val end = System.currentTimeMillis()
-        val ev = usm.queryEvents(end - 3L * 24 * 3600 * 1000, end)
-        val e = UsageEvents.Event()
-        val last = HashMap<String, Long>()
-        while (ev.hasNextEvent()) {
-            ev.getNextEvent(e)
-            if (e.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND) last[e.packageName] = e.timeStamp
-        }
-        val pm = packageManager
-        return last.entries
-            .filter { it.key != packageName && (pm.getLeanbackLaunchIntentForPackage(it.key) != null || pm.getLaunchIntentForPackage(it.key) != null) }
-            .sortedByDescending { it.value }
-            .take(8)
-            .map { it.key to it.value }
-    }
-
-    private fun agoText(t: Long): String {
-        val mins = ((System.currentTimeMillis() - t) / 60000).toInt()
-        return nd(when {
-            mins < 1 -> "الآن"
-            mins < 60 -> "قبل $mins دقيقة"
-            mins < 1440 -> "قبل ${mins / 60} ساعة"
-            else -> "قبل ${mins / 1440} يوم"
-        })
-    }
-
-    private fun panelRow(d: Dialog, title: String, sub: String?, icon: Drawable?, onClick: () -> Unit): View {
-        val t = tv(14f, true).apply { text = title }
-        val s = tv(10.5f, false, dim).apply { text = sub ?: ""; visibility = if (sub == null) View.GONE else View.VISIBLE }
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutDirection = View.LAYOUT_DIRECTION_RTL
-            gravity = Gravity.CENTER_VERTICAL
-            background = slateGlass(130, 16, Color.argb(30, 255, 255, 255), 1)
-            setPadding(dp(14), dp(10), dp(14), dp(10))
-            isFocusable = true
-            isClickable = true
-            if (icon != null) addView(ImageView(this@MainActivity).apply { setImageDrawable(icon) }, LinearLayout.LayoutParams(dp(38), dp(38)).apply { marginEnd = dp(12) })
-            val c = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
-            c.addView(t)
-            c.addView(s)
-            addView(c, LinearLayout.LayoutParams(0, -2, 1f))
-            setOnClickListener { d.dismiss(); onClick() }
-            setOnFocusChangeListener { v, f ->
-                v.background = if (f) focusBg(16) else slateGlass(130, 16, Color.argb(30, 255, 255, 255), 1)
-                t.setTextColor(if (f) focusFg() else Color.WHITE)
-                s.setTextColor(if (f) focusFg() else dim)
-            }
-        }
-    }
-
-    private fun showRecentsPanel() {
-        val d = Dialog(this)
-        d.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        d.window?.setBackgroundDrawableResource(android.R.color.transparent)
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutDirection = View.LAYOUT_DIRECTION_RTL
-            background = slateGlass(250, 26, Color.argb(70, 255, 255, 255), 1)
-            setPadding(dp(18), dp(18), dp(18), dp(14))
-        }
-        panel.addView(tv(20f, true).apply { text = "التطبيقات" })
-        panel.addView(tv(12f, true, accent).apply { text = "التطبيقات التي تم فتحها مؤخراً"; setPadding(0, dp(4), 0, dp(10)) })
-        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val lp = { LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) } }
-        if (!hasUsageAccess()) {
-            list.addView(tv(12f, false, dim).apply {
-                text = "لعرض آخر التطبيقات لازم تفعّل إذن «الوصول إلى بيانات الاستخدام» للواجهة."
-                setLineSpacing(0f, 1.15f)
-                setPadding(dp(4), 0, dp(4), dp(8))
-            })
-        } else {
-            val recents = try { recentPackages() } catch (e: Throwable) { emptyList() }
-            if (recents.isEmpty()) {
-                list.addView(tv(12f, false, dim).apply { text = "لا توجد تطبيقات حديثة بعد."; setPadding(dp(4), 0, dp(4), dp(8)) })
-            }
-            for ((pkg, t) in recents) {
-                val ic = try { packageManager.getApplicationIcon(pkg) } catch (e: Throwable) { null }
-                list.addView(panelRow(d, appLabel(pkg), agoText(t), ic) { launchPkg(pkg) }, lp())
-            }
-        }
-        panel.addView(MaxHeightScroll(this, resources.displayMetrics.heightPixels - dp(260)).apply {
-            isVerticalScrollBarEnabled = false
-            addView(list)
-        }, LinearLayout.LayoutParams(-1, -2))
-        panel.addView(panelRow(d, "الاطلاع على كل التطبيقات", null, null) { go(Intent(Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS)) }, lp())
-        panel.addView(panelRow(d, "الأذونات", "الوصول إلى بيانات الاستخدام", null) { go(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }, lp())
-        d.setContentView(panel, ViewGroup.LayoutParams(dp(380), ViewGroup.LayoutParams.WRAP_CONTENT))
-        val win = d.window
-        if (win != null) {
-            win.setLayout(dp(380), ViewGroup.LayoutParams.WRAP_CONTENT)
-            win.setGravity(Gravity.TOP or Gravity.LEFT)
-            val a = win.attributes
-            a.x = dp(24)
-            a.y = dp(24)
-            a.dimAmount = 0.45f
-            win.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-            win.attributes = a
-        }
-        d.show()
-        list.getChildAt(0)?.let { v -> if (v.isFocusable) v.post { v.requestFocus() } }
-    }
-
-    /* ─────────── نصوص وخلفية ─────────── */
-    private fun askText(title: String, hint: String, current: String, onOk: (String) -> Unit) {
-        val input = EditText(this).apply {
-            this.hint = hint
-            setText(current)
-            setTextColor(Color.WHITE)
-            setHintTextColor(Color.GRAY)
-            setPadding(dp(14), dp(14), dp(14), dp(14))
-        }
-        AlertDialog.Builder(this)
-            .setTitle(title)
-            .setView(input)
-            .setPositiveButton("تطبيق") { _, _ -> onOk(input.text.toString()) }
-            .setNegativeButton("إلغاء", null)
-            .show()
-    }
-
-    private fun showBgUrlDialog() {
-        askText("صورة خلفية الواجهة", "أدخل رابط صورة مباشر (HTTPS)", prefs.getString("custom_bg_url", "") ?: "") { url ->
-            val u = url.trim()
-            if (u.isNotEmpty()) {
-                prefs.edit().putString("custom_bg_url", u).apply()
-                applyCustomBackground()
-                refreshSection()
-            }
-        }
-    }
-
-    private fun shell(): Pair<Dialog, LinearLayout> {
-        val d = Dialog(this)
-        d.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        d.window?.setBackgroundDrawableResource(android.R.color.transparent)
-        val s = LinearLayout(this).unclip().apply {
-            orientation = LinearLayout.VERTICAL
-            layoutDirection = View.LAYOUT_DIRECTION_RTL
-            background = slateGlass(245, 28, Color.argb(70, 255, 255, 255), 1)
-            setPadding(dp(28), dp(22), dp(28), dp(22))
-        }
-        return d to s
-    }
-
-    private fun optionRow(label: String, onClick: () -> Unit): View = tv(15f, true, Color.WHITE).apply {
-        text = label
-        setPadding(dp(18), dp(12), dp(18), dp(12))
-        background = slateGlass(160, 16, Color.argb(35, 255, 255, 255), 1)
-        isFocusable = true
-        isClickable = true
-        setOnClickListener { onClick() }
-        setOnFocusChangeListener { v, f ->
-            v.background = if (f) focusBg(16) else slateGlass(160, 16, Color.argb(35, 255, 255, 255), 1)
-            (v as TextView).setTextColor(if (f) focusFg() else Color.WHITE)
-        }
-    }
-
-    /* ─────────── التحديث من نفس الواجهة ─────────── */
-    private fun registerInstallReceiver() {
-        installReceiver = object : BroadcastReceiver() {
-            override fun onReceive(c: Context, i: Intent) {
-                when (i.getIntExtra(PackageInstaller.EXTRA_STATUS, -1)) {
-                    PackageInstaller.STATUS_PENDING_USER_ACTION -> {
-                        @Suppress("DEPRECATION")
-                        val confirm = i.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
-                        if (confirm != null) {
-                            try { startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Throwable) { }
-                        }
-                    }
-                    PackageInstaller.STATUS_SUCCESS -> {
-                        downloading = false
-                        Toast.makeText(this@MainActivity, "تم التحديث ✓", Toast.LENGTH_LONG).show()
-                    }
-                    else -> {
-                        downloading = false
-                        val msg = i.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: ""
-                        Toast.makeText(this@MainActivity, "تعذر التثبيت: $msg", Toast.LENGTH_LONG).show()
-                        updateSubTv?.text = "فشل التثبيت — تأكد أن التوقيع نفسه ورقم الإصدار أعلى"
-                    }
-                }
-            }
-        }
-        val f = IntentFilter(installAction)
-        val r = installReceiver!!
-        if (Build.VERSION.SDK_INT >= 33) registerReceiver(r, f, Context.RECEIVER_EXPORTED)
-        else registerReceiver(r, f)
-    }
-
-    private fun checkUpdate() {
-        val url = (prefs.getString("update_url", "") ?: "").trim()
-        if (url.isEmpty()) {
-            Toast.makeText(this, "حدّد رابط التحديث أولاً", Toast.LENGTH_SHORT).show()
-            return
-        }
-        updateMsg = "جاري الفحص…"
-        refreshSection()
-        thread {
-            var info: UpdateInfo? = null
-            var msg = ""
-            try {
-                if (url.substringBefore('?').lowercase(Locale.ROOT).endsWith(".apk")) {
-                    info = UpdateInfo(Int.MAX_VALUE, "", url, "رابط مباشر للنسخة الأحدث", true)
-                    msg = "رابط APK مباشر — جاهز للتنزيل"
-                } else {
-                    val conn = URL(url).openConnection() as HttpURLConnection
-                    conn.connectTimeout = 8000
-                    conn.readTimeout = 8000
-                    val txt = conn.inputStream.bufferedReader().use { it.readText() }
-                    val j = JSONObject(txt)
-                    val code = j.optInt("versionCode", 0)
-                    val name = j.optString("versionName", "")
-                    val apk = j.optString("apkUrl", "")
-                    val notes = j.optString("notes", "")
-                    val cur = versionInfo()
-                    if (apk.isNotEmpty() && code > cur.second) {
-                        info = UpdateInfo(code, name, apk, notes, false)
-                        msg = nd("يوجد تحديث: $name (رقم $code)")
-                    } else {
-                        msg = "أنت على آخر إصدار ✓"
-                    }
-                }
-            } catch (e: Throwable) {
-                msg = "تعذر الفحص: تأكد من الرابط والاتصال"
-            }
-            ui.post {
-                updateInfo = info
-                updateMsg = msg
-                if (currentPage == 2 && currentSection == 8) refreshSection()
-            }
-        }
-    }
-
-    private fun downloadAndInstall(info: UpdateInfo) {
-        if (Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
-            Toast.makeText(this, "فعّل «التثبيت من مصادر غير معروفة» للواجهة ثم ارجع واضغط تحديث", Toast.LENGTH_LONG).show()
-            go(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
-            return
-        }
-        downloading = true
-        updateSubTv?.text = "جاري التنزيل… 0%"
-        thread {
-            try {
-                val conn = URL(info.apk).openConnection() as HttpURLConnection
-                conn.connectTimeout = 10000
-                conn.readTimeout = 15000
-                val total = conn.contentLength
-                val file = File(cacheDir, "wm_update.apk")
-                if (file.exists()) file.delete()
-                var done = 0L
-                var lastPct = -1
-                conn.inputStream.use { ins ->
-                    file.outputStream().use { out ->
-                        val buf = ByteArray(64 * 1024)
-                        while (true) {
-                            val n = ins.read(buf)
-                            if (n < 0) break
-                            out.write(buf, 0, n)
-                            done += n
-                            if (total > 0) {
-                                val pct = (done * 100 / total).toInt()
-                                if (pct != lastPct) {
-                                    lastPct = pct
-                                    ui.post { updateSubTv?.text = nd("جاري التنزيل… $pct%") }
-                                }
-                            }
-                        }
-                    }
-                }
-                ui.post { updateSubTv?.text = "جاري التثبيت… وافق على نافذة النظام" }
-                installApk(file)
-            } catch (e: Throwable) {
-                downloading = false
-                ui.post {
-                    updateSubTv?.text = "فشل التنزيل — تأكد من الرابط والاتصال"
-                    Toast.makeText(this, "فشل التنزيل", Toast.LENGTH_SHORT).show()
-                }
-            }
-        }
-    }
-
-    private fun installApk(file: File) {
-        val pi = packageManager.packageInstaller
-        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
-        val id = pi.createSession(params)
-        val session = pi.openSession(id)
-        file.inputStream().use { ins ->
-            session.openWrite("wm_update", 0, file.length()).use { out ->
-                ins.copyTo(out)
-                session.fsync(out)
-            }
-        }
-        val intent = Intent(installAction).setPackage(packageName)
-        val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
-        val pending = PendingIntent.getBroadcast(this, id, intent, flags)
-        session.commit(pending.intentSender)
-        session.close()
-    }
-
-    /* ─────────── المباريات ─────────── */
-    private fun fetchMatches() {
-        thread {
-            val r: List<Match>? = try { Data.matches() } catch (e: Throwable) { null }
-            ui.post { matchesData = r; renderMatches() }
-        }
-    }
-
-    private fun renderMatches() {
-        if (!::homeMatchRow.isInitialized) return
-        homeMatchRow.removeAllViews()
-        matchesGrid.removeAllViews()
-        statusViews.clear()
-        val all = matchesData
-        var list = all?.sortedWith(compareByDescending<Match> { rank(it) }.thenBy { it.time })
-        if (list != null && pBool("hide_finished", false)) list = list.filter { it.note != "انتهت" }
-        tickerTv.text = if (list == null || list.isEmpty()) "" else nd("⚽  " + list.take(5).joinToString("   •   ") { "${it.home} × ${it.away} (${it.center})" })
-        if (list == null || list.isEmpty()) {
-            val msg = if (all == null) "تعذر تحميل المباريات، تأكد من الاتصال" else "لا توجد مباريات مسجلة اليوم"
-            homeMatchRow.addView(tv(14f, false, dim).apply { text = msg; setPadding(dp(8), dp(14), dp(8), dp(14)) })
-            matchesGrid.addView(tv(15f, false, dim).apply { text = msg; setPadding(dp(8), dp(14), dp(8), dp(14)) })
-            return
-        }
-        val limit = when (pInt("match_count", 3)) { 0 -> 5; 1 -> 8; 2 -> 12; else -> Int.MAX_VALUE }
-        for (m in list.take(limit)) {
-            homeMatchRow.addView(miniMatch(m), LinearLayout.LayoutParams(dp(176), dp(132)).apply { marginEnd = dp(10) })
-        }
-        val w = (resources.displayMetrics.widthPixels - dp(68) - dp(44) - 3 * dp(20)) / 3
-        for (m in list) {
-            matchesGrid.addView(matchCard(m), GridLayout.LayoutParams().apply {
-                width = w
-                height = -2
-                setMargins(dp(10), dp(10), dp(10), dp(10))
-            })
-        }
-    }
-
-    private fun miniLogo(name: String, url: String): ImageView {
-        val iv = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_CENTER; setImageDrawable(crest(name)) }
-        if (url.isNotEmpty()) loadLogo(url, iv)
-        return iv
-    }
-
-    private fun miniClub(name: String, url: String): LinearLayout {
-        val c = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
-        c.addView(miniLogo(name, url), LinearLayout.LayoutParams(dp(30), dp(30)))
-        c.addView(tv(10f, true).apply {
-            text = name
-            maxLines = 2
-            ellipsize = TextUtils.TruncateAt.END
-            gravity = Gravity.CENTER
-            setPadding(0, dp(3), 0, 0)
-        })
-        return c
-    }
-
-    private fun miniMatch(m: Match): View {
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = glass(165, 20, Color.argb(60, 255, 255, 255), 1)
-            setPadding(dp(10), dp(8), dp(10), dp(8))
-            isFocusable = true
-            isClickable = true
-            roundOutline(20)
-            setOnClickListener { showPage(1) }
-            setOnFocusChangeListener { v, f ->
-                v.background = glass(if (f) 240 else 165, 20, if (f) focusRing() else Color.argb(60, 255, 255, 255), if (f) 2 else 1)
-                v.translationZ = if (f) dp(10).toFloat() else 0f
-                v.elevation = if (f) 14f else 2f
-                v.animate()
-                    .scaleX(if (f) 1.06f else 1f)
-                    .scaleY(if (f) 1.06f else 1f)
-                    .translationY(if (f) -dp(3).toFloat() else 0f)
-                    .setDuration(140)
-                    .start()
-            }
-        }
-        val head = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        head.addView(tv(9.5f, true, accent).apply { text = m.league; maxLines = 1; ellipsize = TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f))
-        val st = tv(9f, true, if (m.live) gold else dim).apply { text = nd(statusText(m)); maxLines = 1 }
-        statusViews.add(st to m)
-        head.addView(st)
-        card.addView(head, LinearLayout.LayoutParams(-1, -2))
-
-        val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        row.addView(miniClub(m.home, m.homeLogo), LinearLayout.LayoutParams(0, -2, 1f))
-        row.addView(tv(14f, true, gold).apply { text = nd(m.center); gravity = Gravity.CENTER; maxLines = 1; setPadding(dp(4), 0, dp(4), 0) })
-        row.addView(miniClub(m.away, m.awayLogo), LinearLayout.LayoutParams(0, -2, 1f))
-        card.addView(row, LinearLayout.LayoutParams(-1, 0, 1f))
-        return card
-    }
-
-    private fun matchCard(m: Match): View {
-        val card = LinearLayout(this).unclip().apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            background = slateGlass(210, 22, Color.argb(60, 255, 255, 255), 1)
-            setPadding(dp(16), dp(12), dp(16), dp(12))
-            isFocusable = true
-            isClickable = true
-            roundOutline(22)
-            setOnFocusChangeListener { v, f ->
-                v.background = slateGlass(if (f) 245 else 210, 22, if (f) focusRing() else Color.argb(60, 255, 255, 255), if (f) 3 else 1)
-                v.translationZ = if (f) dp(16).toFloat() else 0f
-                v.elevation = if (f) 26f else 4f
-                v.animate()
-                    .scaleX(if (f) 1.07f else 1f)
-                    .scaleY(if (f) 1.07f else 1f)
-                    .translationY(if (f) -dp(4).toFloat() else 0f)
-                    .setDuration(140)
-                    .start()
-            }
-        }
-        val head = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        head.addView(tv(11f, true, accent).apply { text = m.league; maxLines = 1 })
-        head.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
-        val st = tv(10.5f, true, if (m.live) gold else dim).apply { text = nd(statusText(m)) }
-        statusViews.add(st to m)
-        head.addView(st)
-        card.addView(head, LinearLayout.LayoutParams(-1, -2))
-
-        val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(10), 0, dp(4)) }
-        row.addView(clubColumn(m.home, m.homeLogo), LinearLayout.LayoutParams(0, -2, 1f))
-        row.addView(tv(18f, true, gold).apply { text = nd(m.center); gravity = Gravity.CENTER; setPadding(dp(8), 0, dp(8), 0) })
-        row.addView(clubColumn(m.away, m.awayLogo), LinearLayout.LayoutParams(0, -2, 1f))
-        card.addView(row, LinearLayout.LayoutParams(-1, -2))
-        return card
-    }
-
-    private fun clubColumn(name: String, logoUrl: String): LinearLayout {
-        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
-        col.addView(miniLogo(name, logoUrl), LinearLayout.LayoutParams(dp(42), dp(42)))
-        col.addView(tv(12f, true).apply { text = name; maxLines = 2; gravity = Gravity.CENTER; setPadding(0, dp(5), 0, 0) })
-        return col
-    }
-
-    private f
+}
