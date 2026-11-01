@@ -14,7 +14,6 @@ import android.graphics.*
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.LayerDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -96,7 +95,6 @@ class AmbientView(c: Context) : View(c) {
         val dx = Math.sin(phase.toDouble()).toFloat() * w * 0.02f
         val dy = Math.cos(phase.toDouble()).toFloat() * h * 0.02f
 
-        // خلفية داكنة نقية ومريحة تماماً تطابق نظافة وفخامة الصورة المطلوبة
         paint.shader = LinearGradient(
             0f, 0f, w, h,
             intArrayOf(0xFF04060A.toInt(), 0xFF0B0E16.toInt(), 0xFF06080F.toInt()),
@@ -105,7 +103,6 @@ class AmbientView(c: Context) : View(c) {
         )
         cv.drawRect(0f, 0f, w, h, paint)
 
-        // إضاءة محيطية هادئة جداً وغير مزعجة
         paint.shader = RadialGradient(
             w * 0.25f + dx, h * 0.15f + dy, w * 0.6f,
             intArrayOf(Color.argb(90, r, g, b), Color.TRANSPARENT),
@@ -122,6 +119,77 @@ class AmbientView(c: Context) : View(c) {
         )
         cv.drawRect(0f, 0f, w, h, paint)
     }
+}
+
+/**
+ * زجاج حقيقي: تعبئة شفافة متدرجة + لمعة علوية + حد متدرج (أقوى من فوق وأنعم تحت)
+ */
+class GlassDrawable(
+    private val radius: Float,
+    private val strokePx: Float,
+    private val topA: Int,
+    private val botA: Int,
+    private val borderColor: Int,
+    private val solidBorder: Boolean
+) : Drawable() {
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val sheen = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private val rect = RectF()
+    private val inset = RectF()
+
+    override fun onBoundsChange(b: Rect) {
+        super.onBoundsChange(b)
+        val t = b.top.toFloat()
+        val bt = b.bottom.toFloat()
+        val h = bt - t
+        fill.shader = LinearGradient(
+            0f, t, 0f, bt,
+            Color.argb(topA, 62, 68, 98), Color.argb(botA, 20, 24, 38),
+            Shader.TileMode.CLAMP
+        )
+        sheen.shader = LinearGradient(
+            0f, t, 0f, t + h * 0.55f,
+            Color.argb(34, 255, 255, 255), Color.argb(0, 255, 255, 255),
+            Shader.TileMode.CLAMP
+        )
+        line.strokeWidth = strokePx
+        val r = Color.red(borderColor)
+        val g = Color.green(borderColor)
+        val bl = Color.blue(borderColor)
+        val a = Color.alpha(borderColor)
+        line.shader = if (solidBorder) {
+            LinearGradient(
+                b.left.toFloat(), t, b.right.toFloat(), bt,
+                intArrayOf(Color.argb(a, r, g, bl), Color.argb((a * 0.85f).toInt(), r, g, bl), Color.argb(a, r, g, bl)),
+                floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP
+            )
+        } else {
+            LinearGradient(
+                b.left.toFloat(), t, b.right.toFloat(), bt,
+                intArrayOf(Color.argb(a, r, g, bl), Color.argb((a * 0.22f).toInt(), r, g, bl), Color.argb((a * 0.65f).toInt(), r, g, bl)),
+                floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP
+            )
+        }
+    }
+
+    override fun draw(c: Canvas) {
+        val b = bounds
+        if (b.isEmpty) return
+        rect.set(b.left.toFloat(), b.top.toFloat(), b.right.toFloat(), b.bottom.toFloat())
+        c.drawRoundRect(rect, radius, radius, fill)
+        c.drawRoundRect(rect, radius, radius, sheen)
+        if (strokePx > 0f) {
+            val h = strokePx / 2f
+            inset.set(rect.left + h, rect.top + h, rect.right - h, rect.bottom - h)
+            c.drawRoundRect(inset, (radius - h).coerceAtLeast(0f), (radius - h).coerceAtLeast(0f), line)
+        }
+    }
+
+    override fun setAlpha(alpha: Int) {}
+    override fun setColorFilter(colorFilter: ColorFilter?) {}
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 }
 
 class MainActivity : Activity() {
@@ -217,44 +285,25 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun glassOf(fillAlpha: Int, radius: Int, strokeColor: Int, strokeDp: Int): Drawable {
+        val a = (fillAlpha * 0.62f).toInt().coerceIn(0, 255)
+        val sa = Color.alpha(strokeColor)
+        val solid = sa == 255
+        val borderA = if (solid) 255 else (sa * 2.4f).toInt().coerceIn(0, 255)
+        val border = Color.argb(borderA, Color.red(strokeColor), Color.green(strokeColor), Color.blue(strokeColor))
+        val sp = if (strokeDp <= 0) 0f else maxOf(strokeDp.toFloat(), 1f) * resources.displayMetrics.density * 1.15f
+        return GlassDrawable(dp(radius).toFloat(), sp, a, (a * 0.9f).toInt(), border, solid)
+    }
+
     private fun slateGlass(
         fillAlpha: Int = 210,
         radius: Int = 24,
         strokeColor: Int = Color.argb(40, 255, 255, 255),
         strokeDp: Int = 1
-    ): Drawable {
-        val r = dp(radius).toFloat()
-        val base = GradientDrawable(
-            GradientDrawable.Orientation.TOP_BOTTOM,
-            intArrayOf(
-                Color.argb(fillAlpha.coerceIn(0, 255), 24, 28, 38),
-                Color.argb((fillAlpha * 0.92f).toInt().coerceIn(0, 255), 16, 20, 28)
-            )
-        ).apply {
-            cornerRadius = r
-            if (strokeDp > 0) setStroke(dp(strokeDp), strokeColor)
-        }
-        return base
-    }
+    ): Drawable = glassOf(fillAlpha, radius, strokeColor, strokeDp)
 
-    private fun glass(alpha: Int = 140, radius: Int = 20, strokeColor: Int = Color.argb(80, 255, 255, 255), strokeDp: Int = 1): Drawable {
-        val r = dp(radius).toFloat()
-        val base = GradientDrawable().apply {
-            setColor(Color.argb((alpha * 0.55f).toInt().coerceAtMost(160), 18, 22, 32))
-            cornerRadius = r
-        }
-        val shine = GradientDrawable(
-            GradientDrawable.Orientation.TOP_BOTTOM,
-            intArrayOf(
-                Color.argb((alpha * 0.3f).toInt().coerceAtMost(255), 255, 255, 255),
-                Color.argb((alpha * 0.08f).toInt().coerceAtMost(255), 255, 255, 255)
-            )
-        ).apply {
-            cornerRadius = r
-            if (strokeDp > 0) setStroke(dp(strokeDp), strokeColor)
-        }
-        return LayerDrawable(arrayOf(base, shine))
-    }
+    private fun glass(alpha: Int = 140, radius: Int = 20, strokeColor: Int = Color.argb(80, 255, 255, 255), strokeDp: Int = 1): Drawable =
+        glassOf(alpha, radius, strokeColor, strokeDp)
 
     private fun solidCard(color: Int, radius: Int = 18, strokeColor: Int = Color.TRANSPARENT, strokeDp: Int = 0) = GradientDrawable().apply {
         setColor(color)
@@ -608,17 +657,17 @@ class MainActivity : Activity() {
             setPadding(dp(4), dp(4), dp(4), dp(8))
         }
 
-        // اللوحة الزجاجية الموحدة مع مقاسات ثابتة ومريحة تمنع أي تداخل نهائياً
-        val unifiedBoard = LinearLayout(this).unclip().apply {
+        // اللوحة الزجاجية الموحدة (تتمدد لتملأ المساحة بين الهيدر والدوك)
+        val unifiedBoard = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = slateGlass(215, 26, Color.argb(45, 255, 255, 255), 1)
-            setPadding(dp(22), dp(16), dp(22), dp(16))
-            roundOutline(26)
+            background = slateGlass(215, 28, Color.argb(45, 255, 255, 255), 1)
+            setPadding(dp(22), dp(14), dp(22), dp(14))
+            roundOutline(28)
         }
 
-        // 1. القسم الأيمن: الطقس (عرض ثابت منظم)
-        val weatherCol = LinearLayout(this).unclip().apply {
+        // 1. الطقس
+        val weatherCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(4), 0, dp(12), 0)
         }
@@ -654,13 +703,12 @@ class MainActivity : Activity() {
         weatherCol.addView(weatherSubTv)
         unifiedBoard.addView(weatherCol, LinearLayout.LayoutParams(dp(195), -2))
 
-        // فاصل عمودي 1
         unifiedBoard.addView(View(this).apply {
             background = solidCard(Color.argb(30, 255, 255, 255), 1)
         }, LinearLayout.LayoutParams(dp(1), dp(130)).apply { setMargins(dp(8), 0, dp(12), 0) })
 
-        // 2. القسم الأوسط: مواقيت الصلاة (عرض ثابت منظم)
-        val prayerCol = LinearLayout(this).unclip().apply {
+        // 2. مواقيت الصلاة
+        val prayerCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(4), 0, dp(12), 0)
         }
@@ -680,13 +728,12 @@ class MainActivity : Activity() {
         prayerCol.addView(prayerTimerTv)
         unifiedBoard.addView(prayerCol, LinearLayout.LayoutParams(dp(220), -2))
 
-        // فاصل عمودي 2
         unifiedBoard.addView(View(this).apply {
             background = solidCard(Color.argb(30, 255, 255, 255), 1)
         }, LinearLayout.LayoutParams(dp(1), dp(130)).apply { setMargins(dp(8), 0, dp(12), 0) })
 
-        // 3. القسم الأيسر: مباريات اليوم (ياخذ المساحة المتبقية بمرونة كاملة مع شريط تمرير)
-        val matchesCol = LinearLayout(this).unclip().apply {
+        // 3. مباريات اليوم — مقصوصة داخل حدودها فلا تتداخل مع الطقس والصلاة أبداً
+        val matchesCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
         }
         val mHead = LinearLayout(this).apply {
@@ -712,24 +759,27 @@ class MainActivity : Activity() {
         homeMatchRow = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(4), dp(10), dp(4), dp(4))
+            setPadding(dp(10), dp(14), dp(10), dp(14))
         }
-        val matchScroll = HorizontalScrollView(this).unclip().apply {
+        val matchScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            clipChildren = true
+            clipToPadding = false
             addView(homeMatchRow)
         }
         matchesCol.addView(matchScroll, LinearLayout.LayoutParams(-1, -2))
         unifiedBoard.addView(matchesCol, LinearLayout.LayoutParams(0, -2, 1f))
 
-        col.addView(unifiedBoard, LinearLayout.LayoutParams(-1, -2))
+        col.addView(unifiedBoard, LinearLayout.LayoutParams(-1, 0, 1f))
         col.addView(View(this), LinearLayout.LayoutParams(-1, dp(14)))
 
-        // شريط التطبيقات السفلي (Dock)
-        val dock = LinearLayout(this).unclip().apply {
+        // شريط التطبيقات السفلي (Dock) — يقص محتواه داخل إطاره
+        val dock = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = slateGlass(210, 28, Color.argb(45, 255, 255, 255), 1)
-            setPadding(dp(18), dp(14), dp(18), dp(12))
-            roundOutline(28)
+            background = slateGlass(210, 30, Color.argb(45, 255, 255, 255), 1)
+            setPadding(dp(18), dp(10), dp(18), dp(10))
+            roundOutline(30)
         }
 
         reorderHintTv = tv(12.5f, true, gold).apply {
@@ -749,8 +799,11 @@ class MainActivity : Activity() {
                 setDuration(180)
             }
         }
-        dock.addView(HorizontalScrollView(this).unclip().apply {
+        dock.addView(HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            clipChildren = true
+            clipToPadding = false
             addView(favRow)
         }, LinearLayout.LayoutParams(-1, -2))
 
@@ -758,7 +811,8 @@ class MainActivity : Activity() {
 
         return ScrollView(this).unclip().apply {
             isVerticalScrollBarEnabled = false
-            addView(col)
+            isFillViewport = true
+            addView(col, ViewGroup.LayoutParams(-1, -2))
         }
     }
 
@@ -1003,9 +1057,9 @@ class MainActivity : Activity() {
             matchesGrid.addView(tv(15f, false, dim).apply { text = msg; setPadding(dp(8), dp(14), dp(8), dp(14)) })
             return
         }
-        val cw = dp(180)
+        // بطاقات شبه مربعة بحجم ثابت ومتطابقة مع زجاج الواجهة
         for (m in list) {
-            homeMatchRow.addView(miniMatch(m), LinearLayout.LayoutParams(cw, -2).apply { marginEnd = dp(10) })
+            homeMatchRow.addView(miniMatch(m), LinearLayout.LayoutParams(dp(176), dp(132)).apply { marginEnd = dp(10) })
         }
         val w = (resources.displayMetrics.widthPixels - dp(68) - dp(44) - 3 * dp(20)) / 3
         for (m in list) {
@@ -1023,22 +1077,35 @@ class MainActivity : Activity() {
         return iv
     }
 
+    private fun miniClub(name: String, url: String): LinearLayout {
+        val c = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+        c.addView(miniLogo(name, url), LinearLayout.LayoutParams(dp(30), dp(30)))
+        c.addView(tv(10f, true).apply {
+            text = name
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+            gravity = Gravity.CENTER
+            setPadding(0, dp(3), 0, 0)
+        })
+        return c
+    }
+
     private fun miniMatch(m: Match): View {
-        val card = LinearLayout(this).unclip().apply {
+        val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = glass(165, 16, Color.argb(60, 255, 255, 255), 1)
+            background = glass(165, 20, Color.argb(60, 255, 255, 255), 1)
             setPadding(dp(10), dp(8), dp(10), dp(8))
             isFocusable = true
             isClickable = true
-            roundOutline(16)
+            roundOutline(20)
             setOnClickListener { showPage(1) }
             setOnFocusChangeListener { v, f ->
-                v.background = glass(if (f) 240 else 165, 16, if (f) Color.WHITE else Color.argb(60, 255, 255, 255), if (f) 2 else 1)
-                v.translationZ = if (f) dp(16).toFloat() else 0f
-                v.elevation = if (f) 24f else 2f
+                v.background = glass(if (f) 240 else 165, 20, if (f) Color.WHITE else Color.argb(60, 255, 255, 255), if (f) 2 else 1)
+                v.translationZ = if (f) dp(10).toFloat() else 0f
+                v.elevation = if (f) 14f else 2f
                 v.animate()
-                    .scaleX(if (f) 1.08f else 1f)
-                    .scaleY(if (f) 1.08f else 1f)
+                    .scaleX(if (f) 1.06f else 1f)
+                    .scaleY(if (f) 1.06f else 1f)
                     .translationY(if (f) -dp(3).toFloat() else 0f)
                     .setDuration(140)
                     .start()
@@ -1051,18 +1118,11 @@ class MainActivity : Activity() {
         head.addView(st)
         card.addView(head, LinearLayout.LayoutParams(-1, -2))
 
-        val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(5), 0, dp(3)) }
-        row.addView(miniLogo(m.home, m.homeLogo), LinearLayout.LayoutParams(dp(26), dp(26)))
-        row.addView(tv(14f, true, gold).apply { text = m.center; gravity = Gravity.CENTER; maxLines = 1 }, LinearLayout.LayoutParams(0, -2, 1f))
-        row.addView(miniLogo(m.away, m.awayLogo), LinearLayout.LayoutParams(dp(26), dp(26)))
-        card.addView(row, LinearLayout.LayoutParams(-1, -2))
-
-        card.addView(tv(10.5f, true, Color.WHITE).apply {
-            text = "${m.home} × ${m.away}"
-            maxLines = 1
-            gravity = Gravity.CENTER
-            ellipsize = TextUtils.TruncateAt.END
-        }, LinearLayout.LayoutParams(-1, -2))
+        val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        row.addView(miniClub(m.home, m.homeLogo), LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(tv(14f, true, gold).apply { text = m.center; gravity = Gravity.CENTER; maxLines = 1; setPadding(dp(4), 0, dp(4), 0) })
+        row.addView(miniClub(m.away, m.awayLogo), LinearLayout.LayoutParams(0, -2, 1f))
+        card.addView(row, LinearLayout.LayoutParams(-1, 0, 1f))
         return card
     }
 
@@ -1341,8 +1401,8 @@ class MainActivity : Activity() {
                     },
                     if (f || movingNow) 3 else 1
                 )
-                v.elevation = if (f || movingNow) 30f else 4f
-                cell.translationZ = if (f || movingNow) dp(18).toFloat() else 0f
+                v.elevation = if (f || movingNow) 14f else 3f
+                cell.translationZ = if (f || movingNow) dp(12).toFloat() else 0f
                 titleTv.setTextColor(
                     when {
                         movingNow -> gold
@@ -1353,13 +1413,13 @@ class MainActivity : Activity() {
                 titleTv.text = if (movingNow) "◀  $label  ▶" else label
 
                 val targetScale = when {
-                    movingNow -> 1.13f
-                    f -> 1.10f
+                    movingNow -> 1.12f
+                    f -> 1.09f
                     else -> 1f
                 }
                 val targetY = when {
-                    movingNow -> -dp(7).toFloat()
-                    f -> -dp(4).toFloat()
+                    movingNow -> -dp(6).toFloat()
+                    f -> -dp(3).toFloat()
                     else -> 0f
                 }
                 cell.animate()
