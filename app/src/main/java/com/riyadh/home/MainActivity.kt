@@ -32,6 +32,11 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.Window
+import android.view.animation.AccelerateInterpolator
+import android.view.animation.DecelerateInterpolator
+import android.view.inputmethod.EditorInfo
+import android.text.Editable
+import android.text.TextWatcher
 import android.widget.*
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -39,6 +44,7 @@ import java.net.URL
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.chrono.HijrahDate
 import java.time.format.DateTimeFormatter
@@ -317,6 +323,21 @@ class MainActivity : Activity() {
     private lateinit var tabTexts: List<TextView>
     private var currentPage = 0
 
+    // درج جميع التطبيقات
+    private lateinit var rootFrame: FrameLayout
+    private lateinit var homeRoot: LinearLayout
+    private lateinit var drawerView: FrameLayout
+    private lateinit var drawerPanel: LinearLayout
+    private lateinit var drawerScroll: ScrollView
+    private lateinit var drawerCountTv: TextView
+    private var drawerOpen = false
+    private var lastDockPkg: String? = null
+    private var lastDrawerPkg: String? = null
+
+    // منتقي الخيارات داخل الإعدادات
+    private var openPicker: View? = null
+    private var prayerZone: ZoneId? = null
+
     private lateinit var favRow: LinearLayout
     private lateinit var reorderHintTv: TextView
     private lateinit var allGrid: GridLayout
@@ -353,6 +374,7 @@ class MainActivity : Activity() {
     private val logoCache = ConcurrentHashMap<String, Bitmap>()
     private val bgCache = ConcurrentHashMap<String, Bitmap>()
     private val feedsTask = Runnable { fetchMatches(); refreshFeeds() }
+    private val matchesTask = Runnable { fetchMatches() }
     private val clockTask = Runnable { updateClock() }
     private val rebuildTask = Runnable { doRebuild() }
 
@@ -422,7 +444,35 @@ class MainActivity : Activity() {
     })
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-    private fun city(): City = Data.cities[prefs.getInt("city_idx", 0).coerceIn(0, Data.cities.size - 1)]
+    private fun city(): City {
+        prefs.getString("city_v2", null)?.let { s -> Data.decode(s)?.let { return it } }
+        return Data.legacyCities[prefs.getInt("city_idx", 0).coerceIn(0, Data.legacyCities.size - 1)]
+    }
+
+    private fun setCity(c: City) {
+        prefs.edit().putString("city_v2", Data.encode(c)).apply()
+        prayerZone = null
+        prayersData = emptyList()
+        wTemp = "--°"; wStatus = "جاري التحديث..."; wSub = ""
+        applyWeather()
+        if (::cityHeaderTv.isInitialized) cityHeaderTv.text = "الطقس • ${c.name}"
+        if (::cityPillTv.isInitialized) cityPillTv.text = c.name
+        if (::prayerLayout.isInitialized) prayerLayout.removeAllViews()
+        if (::prayerTimerTv.isInitialized) prayerTimerTv.text = "جاري تحديث المواقيت..."
+        refreshFeeds()
+        if (currentPage == 2) refreshSection()
+    }
+
+    private fun enabledLeagues(): Set<String> = Data.leagues.filter { pBool("lg_" + it.slug, it.def) }.map { it.slug }.toSet()
+
+    private fun isInside(v: View?, parent: View): Boolean {
+        var x: View? = v
+        while (x != null) {
+            if (x === parent) return true
+            x = x.parent as? View
+        }
+        return false
+    }
 
     private fun <T : ViewGroup> T.unclip(): T {
         clipChildren = false
@@ -544,6 +594,22 @@ class MainActivity : Activity() {
             return true
         }
 
+        // درج التطبيقات: السهم لتحت من المفضلة يفتحه، والسهم لفوق من أول صف يقفله
+        if (drawerOpen) {
+            if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                val f = currentFocus
+                val n = f?.focusSearch(View.FOCUS_UP)
+                if (f == null || n == null || !isInside(n, drawerPanel)) {
+                    if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) closeDrawer()
+                    return true
+                }
+            }
+        } else if (currentPage == 0 && reorderingPkg == null && event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN &&
+            ::favRow.isInitialized && favRow.hasFocus() && pBool("show_all_apps", true)) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) openDrawer()
+            return true
+        }
+
         val moving = reorderingPkg
         if (moving != null) {
             if (event.action == KeyEvent.ACTION_DOWN) {
@@ -608,7 +674,8 @@ class MainActivity : Activity() {
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
-        if (intent != null && intent.action == installAction) handleInstallResult(intent)
+        if (intent != null && intent.action == installAction) { handleInstallResult(intent); return }
+        if (drawerOpen) closeDrawer()
     }
 
     @Deprecated("") override fun onBackPressed() {
@@ -617,6 +684,10 @@ class MainActivity : Activity() {
             return
         }
         if (!::pages.isInitialized) return
+        if (drawerOpen) {
+            closeDrawer()
+            return
+        }
         if (currentPage == 2) {
             val nav = settingsNav.getOrNull(currentSection)
             if (nav != null && !nav.hasFocus()) nav.requestFocus() else showPage(0)
@@ -678,6 +749,12 @@ class MainActivity : Activity() {
         pages.forEach { box.addView(it, FrameLayout.LayoutParams(-1, -1)) }
         root.addView(box, LinearLayout.LayoutParams(-1, 0, 1f))
         frame.addView(root, FrameLayout.LayoutParams(-1, -1))
+        rootFrame = frame
+        homeRoot = root
+        drawerOpen = false
+        openPicker = null
+        drawerView = buildDrawer()
+        frame.addView(drawerView, FrameLayout.LayoutParams(-1, -1))
         setContentView(frame)
         showPage(startPage, animate)
     }
@@ -691,7 +768,21 @@ class MainActivity : Activity() {
         val page = currentPage
         val sec = currentSection
         val row = lastFocusedRow
+        // صورة من الواجهة الحالية نخفيها تدريجياً فوق الجديدة (انتقال ناعم بدل الوميض)
+        var snap: Bitmap? = null
+        try {
+            if (::rootFrame.isInitialized && rootFrame.width > 0 && rootFrame.height > 0) {
+                snap = Bitmap.createBitmap(rootFrame.width, rootFrame.height, Bitmap.Config.ARGB_8888)
+                rootFrame.draw(Canvas(snap))
+            }
+        } catch (e: Throwable) { snap = null }
         buildInterface(page, false)
+        snap?.let { b ->
+            val iv = ImageView(this).apply { setImageBitmap(b); scaleType = ImageView.ScaleType.FIT_XY }
+            rootFrame.addView(iv, FrameLayout.LayoutParams(-1, -1))
+            iv.animate().alpha(0f).setDuration(340).setInterpolator(DecelerateInterpolator())
+                .withEndAction { (iv.parent as? ViewGroup)?.removeView(iv) }.start()
+        }
         lastMin = -1
         updateClock()
         applyWeather()
@@ -705,6 +796,7 @@ class MainActivity : Activity() {
     }
 
     private fun showPage(i: Int, animate: Boolean = true) {
+        if (drawerOpen) closeDrawer(false)
         if (reorderingPkg != null) finishReorderMode()
         currentPage = i
         pages.forEachIndexed { k, p ->
@@ -1029,13 +1121,14 @@ class MainActivity : Activity() {
         if (added == 0) unifiedBoard.visibility = View.GONE
 
         col.addView(unifiedBoard, LinearLayout.LayoutParams(-1, -2))
-        col.addView(View(this), LinearLayout.LayoutParams(-1, dp(14)))
+        // مساحة مرنة تدفع شريط المفضلة لأسفل الشاشة
+        col.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
 
-        // المفضلة (Dock)
+        // المفضلة (Dock) في أسفل الشاشة
         val dock = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = slateGlass(210, 30, Color.argb(45, 255, 255, 255), 1)
-            setPadding(dp(18), dp(10), dp(18), dp(10))
+            setPadding(dp(18), dp(10), dp(18), dp(8))
             roundOutline(30)
         }
         reorderHintTv = tv(12.5f, true, gold).apply {
@@ -1049,7 +1142,7 @@ class MainActivity : Activity() {
         favRow = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(14), dp(16), dp(10))
+            setPadding(dp(16), dp(14), dp(16), dp(8))
             layoutTransition = LayoutTransition().apply { setDuration(180) }
         }
         dock.addView(HorizontalScrollView(this).apply {
@@ -1059,30 +1152,116 @@ class MainActivity : Activity() {
             clipToPadding = false
             addView(favRow)
         }, LinearLayout.LayoutParams(-1, -2))
+        if (pBool("show_all_apps", true)) {
+            dock.addView(tv(10.5f, true, muted).apply {
+                text = "▼   جميع التطبيقات"
+                gravity = Gravity.CENTER
+                letterSpacing = 0.05f
+            }, LinearLayout.LayoutParams(-1, -2))
+        }
         col.addView(dock, LinearLayout.LayoutParams(-1, -2))
+        return col
+    }
 
-        // جميع التطبيقات تحت المفضلة
+    /* ─────────── درج جميع التطبيقات ─────────── */
+    private fun buildDrawer(): FrameLayout {
+        val d = FrameLayout(this).apply {
+            visibility = View.GONE
+            layoutDirection = View.LAYOUT_DIRECTION_RTL
+        }
+        d.addView(View(this).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.argb(90, 0, 0, 0), Color.argb(200, 0, 0, 0)))
+        }, FrameLayout.LayoutParams(-1, -1))
+
+        drawerPanel = LinearLayout(this).unclip().apply {
+            orientation = LinearLayout.VERTICAL
+            background = slateGlass(250, 30, Color.argb(60, 255, 255, 255), 1)
+            setPadding(dp(22), dp(10), dp(22), dp(44))
+            roundOutline(30)
+        }
+        drawerPanel.addView(View(this).apply { background = solidCard(Color.argb(90, 255, 255, 255), 3) },
+            LinearLayout.LayoutParams(dp(56), dp(5)).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = dp(10) })
+
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), 0, dp(14), dp(4))
+        }
+        head.addView(tv(19f, true, accent).apply { text = "جميع التطبيقات" })
+        drawerCountTv = tv(12f, true, muted).apply { setPadding(dp(12), dp(3), 0, 0) }
+        head.addView(drawerCountTv)
+        head.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
+        head.addView(tv(11f, false, muted).apply { text = "▲ للرجوع للرئيسية   •   ضغطة مطولة للخيارات" })
+        drawerPanel.addView(head, LinearLayout.LayoutParams(-1, -2))
+
         allGrid = GridLayout(this).unclip().apply {
             columnCount = gridCols()
-            setPadding(dp(14), dp(10), dp(14), dp(36))
+            setPadding(dp(14), dp(16), dp(14), dp(36))
         }
-        if (pBool("show_all_apps", true)) {
-            col.addView(tv(16f, true, accent).apply {
-                text = "جميع التطبيقات"
-                setPadding(dp(14), dp(22), dp(14), dp(4))
-            })
-            col.addView(tv(11f, false, muted).apply {
-                text = "اضغط مطولاً على أي تطبيق للإدارة أو الإضافة للمفضلة"
-                setPadding(dp(14), 0, dp(14), dp(2))
-            })
-            col.addView(allGrid, LinearLayout.LayoutParams(-1, -2))
-        }
-
-        return ScrollView(this).unclip().apply {
+        drawerScroll = ScrollView(this).apply {
             isVerticalScrollBarEnabled = false
+            isSmoothScrollingEnabled = true
+            overScrollMode = View.OVER_SCROLL_NEVER
             isFillViewport = true
-            addView(col, ViewGroup.LayoutParams(-1, -2))
+            addView(allGrid, ViewGroup.LayoutParams(-1, -2))
         }
+        drawerPanel.addView(drawerScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        d.addView(drawerPanel, FrameLayout.LayoutParams(-1, -1).apply { setMargins(dp(26), dp(28), dp(26), -dp(40)) })
+        return d
+    }
+
+    private fun tileOf(group: ViewGroup, pkg: String?): View? {
+        if (pkg == null) return null
+        for (i in 0 until group.childCount) {
+            val cell = group.getChildAt(i)
+            if (cell.tag == pkg) return (cell as? ViewGroup)?.getChildAt(0)
+        }
+        return null
+    }
+
+    private fun firstTile(group: ViewGroup): View? = (group.getChildAt(0) as? ViewGroup)?.getChildAt(0)
+
+    private fun openDrawer() {
+        if (drawerOpen || !::drawerView.isInitialized) return
+        if (allGrid.childCount == 0) loadAppsAndDock()
+        drawerOpen = true
+        val h = (if (rootFrame.height > 0) rootFrame.height else resources.displayMetrics.heightPixels).toFloat()
+        drawerView.animate().cancel()
+        drawerPanel.animate().cancel()
+        drawerView.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
+        if (drawerView.visibility != View.VISIBLE) {
+            drawerView.alpha = 0f
+            drawerPanel.translationY = h * 0.45f
+            drawerScroll.scrollTo(0, 0)
+        }
+        drawerView.visibility = View.VISIBLE
+        drawerView.animate().alpha(1f).setDuration(220).start()
+        drawerPanel.animate().translationY(0f).setDuration(380).setInterpolator(DecelerateInterpolator(2.4f)).withLayer().start()
+        homeRoot.animate().scaleX(0.94f).scaleY(0.94f).alpha(0.3f).setDuration(340).setInterpolator(DecelerateInterpolator()).start()
+        val target = tileOf(allGrid, lastDrawerPkg) ?: firstTile(allGrid)
+        target?.requestFocus()
+        homeRoot.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+    }
+
+    private fun closeDrawer(animate: Boolean = true) {
+        if (!drawerOpen) return
+        drawerOpen = false
+        homeRoot.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
+        drawerView.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+        if (animate) {
+            val h = (if (rootFrame.height > 0) rootFrame.height else resources.displayMetrics.heightPixels).toFloat()
+            drawerPanel.animate().translationY(h * 0.45f).setDuration(260).setInterpolator(AccelerateInterpolator(1.5f)).withLayer().start()
+            drawerView.animate().alpha(0f).setDuration(260).withEndAction { if (!drawerOpen) drawerView.visibility = View.GONE }.start()
+            homeRoot.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(300).setInterpolator(DecelerateInterpolator()).start()
+        } else {
+            drawerView.animate().cancel()
+            drawerPanel.animate().cancel()
+            homeRoot.animate().cancel()
+            drawerView.visibility = View.GONE
+            drawerView.alpha = 0f
+            homeRoot.scaleX = 1f; homeRoot.scaleY = 1f; homeRoot.alpha = 1f
+        }
+        if (currentPage == 0) (tileOf(favRow, lastDockPkg) ?: firstTile(favRow))?.requestFocus()
     }
 
     private fun buildMatchesPage(): View {
@@ -1236,24 +1415,160 @@ class MainActivity : Activity() {
         box.post { box.getChildAt(0)?.requestFocus() }
     }
 
+    private fun autoLocate() {
+        Toast.makeText(this, "جاري تحديد موقعك…", Toast.LENGTH_SHORT).show()
+        thread {
+            val c = try { Data.locate() } catch (e: Throwable) { null }
+            ui.post {
+                if (c == null) Toast.makeText(this, "تعذر تحديد الموقع، اختر المدينة يدوياً", Toast.LENGTH_LONG).show()
+                else {
+                    setCity(c)
+                    Toast.makeText(this, "تم تحديد موقعك: ${c.name}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun pickRow(label: String, sub: String, selected: Boolean, onFocus: (() -> Unit)?, onClick: () -> Unit): View {
+        val t = tv(14.5f, true, if (selected) accent else Color.WHITE).apply { text = if (selected) "✓  $label" else label }
+        val st = tv(10.5f, false, dim).apply { text = sub; visibility = if (sub.isEmpty()) View.GONE else View.VISIBLE }
+        fun idle(): Drawable = slateGlass(if (selected) 210 else 150, 14, if (selected) accent else Color.argb(35, 255, 255, 255), 1)
+        return LinearLayout(this).unclip().apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+            background = idle()
+            isFocusable = true
+            isClickable = true
+            roundOutline(14)
+            addView(t)
+            addView(st)
+            setOnClickListener { onClick() }
+            setOnFocusChangeListener { v, f ->
+                v.background = if (f) focusBg(14) else idle()
+                t.setTextColor(if (f) focusFg() else if (selected) accent else Color.WHITE)
+                st.setTextColor(if (f) focusFg() else dim)
+                if (f) onFocus?.invoke()
+            }
+        }
+    }
+
+    // اختيار المدينة: مناطق المملكة + الدول العربية + بحث عن أي مدينة + تحديد تلقائي
     private fun openCityPicker() {
         val (dialog, sheet) = shell()
-        sheet.addView(tv(19f, true, accent).apply { text = "اختر مدينتك (الطقس والصلاة)"; setPadding(0, 0, 0, dp(12)) })
-        val list = LinearLayout(this).unclip().apply { orientation = LinearLayout.VERTICAL }
-        val cur = prefs.getInt("city_idx", 0)
-        Data.cities.forEachIndexed { i, c ->
-            list.addView(optionRow((if (i == cur) "✓  " else "") + c.name) {
-                prefs.edit().putInt("city_idx", i).apply()
-                cityHeaderTv.text = "الطقس • ${c.name}"
-                cityPillTv.text = c.name
-                dialog.dismiss()
-                refreshFeeds()
-                if (currentPage == 2) refreshSection()
-            }, LinearLayout.LayoutParams(dp(340), -2).apply { bottomMargin = dp(8) })
+        val cur = city()
+        sheet.addView(tv(19f, true, accent).apply { text = "اختر مدينتك (الطقس والصلاة)" })
+        sheet.addView(tv(11.5f, false, dim).apply {
+            text = "الحالية: ${cur.name}" + (if (cur.sub.isNotEmpty()) "  •  ${cur.sub}" else "")
+            setPadding(0, dp(2), 0, dp(12))
+        })
+
+        val W = dp(780)
+        val bar = LinearLayout(this).unclip().apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        fun inputBg(f: Boolean): Drawable = if (f) slateGlass(225, 16, accent, 2) else slateGlass(170, 16, Color.argb(60, 255, 255, 255), 1)
+        val input = EditText(this).apply {
+            hint = "🔎  اكتب اسم أي مدينة (عربي أو English)"
+            setSingleLine(true)
+            imeOptions = EditorInfo.IME_ACTION_SEARCH
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            setHintTextColor(muted)
+            background = inputBg(false)
+            setPadding(dp(16), dp(11), dp(16), dp(11))
+            setOnFocusChangeListener { v, f -> v.background = inputBg(f) }
         }
-        sheet.addView(ScrollView(this).unclip().apply { isVerticalScrollBarEnabled = false; addView(list) }, LinearLayout.LayoutParams(dp(340), dp(300)))
+        bar.addView(input, LinearLayout.LayoutParams(0, -2, 1f))
+        val panes = LinearLayout(this).unclip().apply { orientation = LinearLayout.HORIZONTAL }
+        val groupsList = LinearLayout(this).unclip().apply { orientation = LinearLayout.VERTICAL; setPadding(dp(6), dp(6), dp(6), dp(6)) }
+        val citiesList = LinearLayout(this).unclip().apply { orientation = LinearLayout.VERTICAL; setPadding(dp(6), dp(6), dp(6), dp(6)) }
+        val groupsScroll = ScrollView(this).apply { isVerticalScrollBarEnabled = false; addView(groupsList) }
+        val citiesScroll = ScrollView(this).apply { isVerticalScrollBarEnabled = false; addView(citiesList) }
+        panes.addView(groupsScroll, LinearLayout.LayoutParams(dp(260), -1))
+        panes.addView(citiesScroll, LinearLayout.LayoutParams(0, -1, 1f).apply { marginStart = dp(12) })
+
+        fun choose(c: City) {
+            dialog.dismiss()
+            setCity(c)
+        }
+        fun isCur(c: City) = c.name == cur.name && Math.abs(c.lat - cur.lat) < 0.02 && Math.abs(c.lon - cur.lon) < 0.02
+        fun message(m: String) {
+            citiesList.removeAllViews()
+            citiesList.addView(tv(13f, false, dim).apply { text = m; setPadding(dp(8), dp(12), dp(8), dp(12)) })
+        }
+        fun showCities(title: String, list: List<City>, focusFirst: Boolean) {
+            citiesList.removeAllViews()
+            citiesList.addView(tv(12f, true, muted).apply { text = title; setPadding(dp(6), 0, dp(6), dp(6)) })
+            for (c in list) {
+                citiesList.addView(pickRow(c.name, c.sub, isCur(c), null) { choose(c) }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
+            }
+            citiesScroll.scrollTo(0, 0)
+            citiesList.animate().cancel()
+            citiesList.alpha = 0f
+            citiesList.translationX = -dp(14).toFloat()
+            citiesList.animate().alpha(1f).translationX(0f).setDuration(180).setInterpolator(DecelerateInterpolator()).start()
+            if (focusFirst) citiesList.post { citiesList.getChildAt(1)?.requestFocus() }
+        }
+
+        var searchSeq = 0
+        fun search(q: String, focus: Boolean) {
+            if (q.trim().length < 2) return
+            val my = ++searchSeq
+            message("جاري البحث عن «${q.trim()}»…")
+            thread {
+                val r = try { Data.searchCities(q) } catch (e: Throwable) { null }
+                ui.post {
+                    if (my != searchSeq || !dialog.isShowing) return@post
+                    when {
+                        r == null -> message("تعذر البحث، تأكد من الاتصال بالإنترنت")
+                        r.isEmpty() -> message("ما لقيت مدينة بهذا الاسم، جرّب كتابة ثانية")
+                        else -> showCities("نتائج البحث عن «${q.trim()}»", r, focus)
+                    }
+                }
+            }
+        }
+        val debounce = Runnable { search(input.text.toString(), false) }
+        input.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                ui.removeCallbacks(debounce)
+                if ((s?.trim()?.length ?: 0) >= 2) ui.postDelayed(debounce, 800)
+            }
+        })
+        input.setOnEditorActionListener { _, action, _ ->
+            if (action == EditorInfo.IME_ACTION_SEARCH || action == EditorInfo.IME_ACTION_DONE) {
+                ui.removeCallbacks(debounce)
+                search(input.text.toString(), true)
+                true
+            } else false
+        }
+        bar.addView(optionRow("📍  موقعي تلقائياً") {
+            dialog.dismiss()
+            autoLocate()
+        }, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(10) })
+        sheet.addView(bar, LinearLayout.LayoutParams(W, -2).apply { bottomMargin = dp(12) })
+        sheet.addView(panes, LinearLayout.LayoutParams(W, dp(330)))
+
+        var focusGroup: View? = null
+        fun addGroup(name: String, list: List<City>, sub: String) {
+            val has = list.any { isCur(it) }
+            val row = pickRow(name, sub, has, { showCities(name, list, false) }) {
+                showCities(name, list, true)
+            }
+            groupsList.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
+            if (has && focusGroup == null) focusGroup = row
+        }
+        groupsList.addView(tv(12f, true, muted).apply { text = "🇸🇦  المملكة العربية السعودية"; setPadding(dp(6), 0, dp(6), dp(6)) })
+        for ((name, list) in Data.saudiRegions) addGroup(name, list, "${list.size} مدن")
+        groupsList.addView(tv(12f, true, muted).apply { text = "الدول العربية"; setPadding(dp(6), dp(10), dp(6), dp(6)) })
+        for ((name, list) in Data.arabCountries) addGroup(name, list, "${list.size} مدن")
+
+        val start = focusGroup ?: groupsList.getChildAt(1)
+        val startIdx = groupsList.indexOfChild(start)
+        val startList = (Data.saudiRegions + Data.arabCountries).getOrNull(if (startIdx <= Data.saudiRegions.size) startIdx - 1 else startIdx - 2)
+        if (startList != null) showCities(startList.first, startList.second, false)
         dialog.setContentView(sheet)
         dialog.show()
+        start?.post { start.requestFocus() }
     }
 
     private fun showBgUrlDialog() {
@@ -1388,8 +1703,8 @@ class MainActivity : Activity() {
         }
         list.addView(optionRow("الاطلاع على كل التطبيقات") {
             dialog.dismiss()
-            showPage(0)
-            allGrid.post { allGrid.getChildAt(0)?.requestFocus() }
+            showPage(0, false)
+            ui.postDelayed({ openDrawer() }, 150)
         }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) })
         box.addView(ScrollView(this).unclip().apply { isVerticalScrollBarEnabled = false; addView(list) }, LinearLayout.LayoutParams(dp(380), dp(330)))
         dialog.setContentView(box)
@@ -1556,7 +1871,7 @@ class MainActivity : Activity() {
                     settingsContent.getChildAt(0)?.requestFocus()
                 }
                 setOnFocusChangeListener { _, f ->
-                    if (f && (i != currentSection || settingsContent.childCount == 0)) showSection(i)
+                    if (f && (i != currentSection || settingsContent.childCount == 0)) showSection(i, true)
                     styleNav()
                 }
             }
@@ -1615,10 +1930,12 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun showSection(i: Int) {
+    private fun showSection(i: Int, animate: Boolean = false) {
         currentSection = i.coerceIn(0, sectionNames.size - 1)
         settingsTitleTv.text = sectionNames[currentSection]
         settingsSubTv.text = sectionSubs[currentSection]
+        openPicker = null
+        settingsContent.layoutTransition = null
         settingsContent.removeAllViews()
         updateSubTv = null
         when (currentSection) {
@@ -1632,6 +1949,14 @@ class MainActivity : Activity() {
         }
         settingsScroll.scrollTo(0, 0)
         styleNav()
+        if (animate) {
+            settingsContent.animate().cancel()
+            settingsContent.alpha = 0f
+            settingsContent.translationX = -dp(18).toFloat()
+            settingsContent.animate().alpha(1f).translationX(0f).setDuration(230).setInterpolator(DecelerateInterpolator(1.6f)).start()
+            settingsTitleTv.alpha = 0.3f
+            settingsTitleTv.animate().alpha(1f).setDuration(230).start()
+        }
     }
 
     private fun refreshSection() {
@@ -1696,7 +2021,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun sToggle(title: String, sub: String, key: String, def: Boolean): View {
+    private fun sToggle(title: String, sub: String, key: String, def: Boolean, rebuild: Boolean = true, onChange: (() -> Unit)? = null): View {
         val sw = WmSwitch(this).apply {
             on = pBool(key, def)
             onColor = accent
@@ -1706,19 +2031,157 @@ class MainActivity : Activity() {
             putBool(key, nv)
             sw.on = nv
             sw.invalidate()
-            scheduleRebuild()
+            onChange?.invoke()
+            if (rebuild) scheduleRebuild()
         }
     }
 
-    private fun sChoice(title: String, sub: String, key: String, opts: List<String>, def: Int): View {
+    // اختيار من قائمة: يفتح شريط خيارات صغير متناسق تحت الصف مباشرة
+    private fun sChoice(
+        title: String, sub: String, key: String, opts: List<String>, def: Int,
+        swatches: List<Int>? = null, rebuild: Boolean = true
+    ): View {
         var cur = pInt(key, def).coerceIn(0, opts.size - 1)
-        val valTv = tv(13f, true, accent).apply { text = opts[cur] }
-        return sRow(title, sub, valTv) {
-            cur = (cur + 1) % opts.size
-            putInt(key, cur)
-            valTv.text = opts[cur]
-            scheduleRebuild()
+        val dot = View(this).apply {
+            visibility = if (swatches != null) View.VISIBLE else View.GONE
+            if (swatches != null) background = solidCard(swatches[cur], 8, Color.argb(220, 255, 255, 255), 1)
         }
+        val valTv = tv(13f, true, accent).apply { text = opts[cur] }
+        val arrow = tv(11f, true, dim).apply { text = "▾" }
+        val trailing = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(dot, LinearLayout.LayoutParams(dp(16), dp(16)).apply { marginEnd = dp(8) })
+            addView(valTv)
+            addView(arrow, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) })
+        }
+        var row: View? = null
+        row = sRow(title, sub, trailing) {
+            val r = row ?: return@sRow
+            togglePicker(r, opts, swatches, cur) { i ->
+                if (i == cur) return@togglePicker
+                cur = i
+                putInt(key, i)
+                valTv.text = opts[i]
+                if (swatches != null) dot.background = solidCard(swatches[i], 8, Color.argb(220, 255, 255, 255), 1)
+                if (rebuild) scheduleRebuild()
+            }
+        }
+        return row!!
+    }
+
+    private fun pickerTransition() = LayoutTransition().apply {
+        disableTransitionType(LayoutTransition.APPEARING)
+        disableTransitionType(LayoutTransition.DISAPPEARING)
+        enableTransitionType(LayoutTransition.CHANGE_APPEARING)
+        enableTransitionType(LayoutTransition.CHANGE_DISAPPEARING)
+        setDuration(220)
+        setInterpolator(LayoutTransition.CHANGE_APPEARING, DecelerateInterpolator(1.6f))
+        setInterpolator(LayoutTransition.CHANGE_DISAPPEARING, DecelerateInterpolator(1.6f))
+    }
+
+    private fun buildChip(label: String, swatch: Int?, selected: Boolean): LinearLayout {
+        val txt = tv(13.5f, true, if (selected) accent else Color.WHITE).apply { text = if (selected) "✓  $label" else label }
+        fun idle(): Drawable = slateGlass(if (selected) 215 else 150, 22, if (selected) accent else Color.argb(40, 255, 255, 255), 1)
+        return LinearLayout(this).unclip().apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(dp(16), 0, dp(16), 0)
+            isFocusable = true
+            isClickable = true
+            roundOutline(22)
+            background = idle()
+            if (swatch != null) {
+                addView(View(context).apply { background = solidCard(swatch, 9, Color.argb(200, 255, 255, 255), 1) },
+                    LinearLayout.LayoutParams(dp(18), dp(18)).apply { marginEnd = dp(8) })
+            }
+            addView(txt)
+            setOnFocusChangeListener { v, f ->
+                v.background = if (f) focusBg(22) else idle()
+                txt.setTextColor(if (f) focusFg() else if (selected) accent else Color.WHITE)
+                v.translationZ = if (f) dp(8).toFloat() else 0f
+                v.animate().scaleX(if (f) 1.08f else 1f).scaleY(if (f) 1.08f else 1f).setDuration(130).start()
+            }
+        }
+    }
+
+    private fun togglePicker(row: View, opts: List<String>, swatches: List<Int>?, cur: Int, onSelect: (Int) -> Unit) {
+        val existing = openPicker
+        if (existing != null) {
+            val owner = existing.tag
+            closePicker(true)
+            if (owner === row) return
+        }
+        val strip = LinearLayout(this).unclip().apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), dp(12), dp(10), dp(12))
+        }
+        val hs = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            clipToPadding = false
+            addView(strip)
+        }
+        val ac = accent
+        val panel = LinearLayout(this).unclip().apply {
+            orientation = LinearLayout.VERTICAL
+            background = slateGlass(190, 18, Color.argb(120, Color.red(ac), Color.green(ac), Color.blue(ac)), 1)
+            setPadding(dp(8), dp(2), dp(8), dp(2))
+            tag = row
+            addView(hs, LinearLayout.LayoutParams(-1, -2))
+        }
+        var curChip: View? = null
+        opts.forEachIndexed { i, o ->
+            val chip = buildChip(o, swatches?.getOrNull(i), i == cur)
+            chip.setOnClickListener {
+                closePicker(true)
+                ui.postDelayed({ onSelect(i) }, 180)
+            }
+            chip.setOnKeyListener { v, code, ev ->
+                when (code) {
+                    KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        if (ev.action == KeyEvent.ACTION_DOWN && ev.repeatCount == 0) closePicker(true)
+                        true
+                    }
+                    KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                        // لا نخلي التحديد يطلع من الشريط للقائمة الجانبية
+                        val n = v.focusSearch(if (code == KeyEvent.KEYCODE_DPAD_LEFT) View.FOCUS_LEFT else View.FOCUS_RIGHT)
+                        n == null || n.parent !== strip
+                    }
+                    else -> false
+                }
+            }
+            strip.addView(chip, LinearLayout.LayoutParams(-2, dp(42)).apply { marginEnd = dp(10) })
+            if (i == cur) curChip = chip
+        }
+        val idx = settingsContent.indexOfChild(row)
+        settingsContent.layoutTransition = pickerTransition()
+        settingsContent.addView(panel, idx + 1, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+        openPicker = panel
+        panel.pivotY = 0f
+        panel.alpha = 0f
+        panel.scaleY = 0.7f
+        panel.translationY = -dp(8).toFloat()
+        panel.animate().alpha(1f).scaleY(1f).translationY(0f).setDuration(240).setInterpolator(DecelerateInterpolator(1.8f)).start()
+        val focusChip = curChip ?: strip.getChildAt(0)
+        panel.post { focusChip?.requestFocus() }
+        ui.postDelayed({ if (openPicker === panel) settingsContent.layoutTransition = null }, 320)
+    }
+
+    private fun closePicker(focusRow: Boolean) {
+        val p = openPicker ?: return
+        openPicker = null
+        val row = p.tag as? View
+        if (focusRow) row?.requestFocus()
+        p.animate().cancel()
+        p.animate().alpha(0f).scaleY(0.7f).translationY(-dp(8).toFloat()).setDuration(170)
+            .setInterpolator(AccelerateInterpolator()).withEndAction {
+                if (p.parent === settingsContent) {
+                    settingsContent.layoutTransition = pickerTransition()
+                    settingsContent.removeView(p)
+                    ui.postDelayed({ if (openPicker == null) settingsContent.layoutTransition = null }, 300)
+                }
+            }.start()
     }
 
     private fun sSlider(title: String, sub: String, key: String, min: Int, max: Int, step: Int, def: Int): View {
@@ -1761,8 +2224,8 @@ class MainActivity : Activity() {
 
     private fun buildAppearance() {
         addHeader("الألوان")
-        addRow(sChoice("لون الخلفية", "تدرج خلفية الواجهة", "bg_palette", palettes.map { it.first }, 0))
-        addRow(sChoice("لون التمييز", "لون العناوين والعناصر المحددة", "accent_idx", accents.map { it.first }, 0))
+        addRow(sChoice("لون الخلفية", "تدرج خلفية الواجهة", "bg_palette", palettes.map { it.first }, 0, palettes.map { it.third }))
+        addRow(sChoice("لون التمييز", "لون العناوين والعناصر المحددة", "accent_idx", accents.map { it.first }, 0, accents.map { it.second }))
         addRow(sToggle("صبغة الزجاج بلون التمييز", "يضيف لمسة من لون التمييز على اللوحات", "glass_tint", false))
         addHeader("الزجاج والحدود")
         addRow(sChoice("نمط الحدود", "زجاجي ناعم أو حاد وواضح", "border_style", listOf("زجاجي", "حاد"), 0))
@@ -1803,8 +2266,10 @@ class MainActivity : Activity() {
     }
 
     private fun buildWeatherSection() {
-        val cityTv = tv(13f, true, accent).apply { text = city().name }
-        addRow(sRow("المدينة", "للطقس ومواقيت الصلاة", cityTv) { openCityPicker() })
+        val c = city()
+        val cityTv = tv(13f, true, accent).apply { text = c.name }
+        addRow(sRow("المدينة", if (c.sub.isNotEmpty()) c.sub else "للطقس ومواقيت الصلاة", cityTv) { openCityPicker() })
+        addRow(sRow("📍 تحديد موقعي تلقائياً", "عن طريق الشبكة (بدون GPS)", null) { autoLocate() })
         addRow(sToggle("إظهار الطقس", "في الصفحة الرئيسية", "show_weather", true))
         addRow(sToggle("إظهار مواقيت الصلاة", "في الصفحة الرئيسية", "show_prayers", true))
         addRow(sToggle("العد التنازلي للأذان", "تحت مواقيت الصلاة", "prayer_countdown", true))
@@ -1815,11 +2280,18 @@ class MainActivity : Activity() {
         addRow(sToggle("إظهار المباريات", "في الصفحة الرئيسية", "show_matches", true))
         addRow(sToggle("الشريط المتحرك", "ملخص المباريات فوق البطاقات", "show_ticker", true))
         addRow(sRow("تحديث المباريات", "جلب المباريات من جديد", null) { fetchMatches() })
+        addHeader("البطولات")
+        for (lg in Data.leagues) {
+            addRow(sToggle(lg.name, if (lg.slug == "afc.champions") "أندية غرب آسيا فقط — بدون شرق آسيا" else "", "lg_" + lg.slug, lg.def, rebuild = false) {
+                ui.removeCallbacks(matchesTask)
+                ui.postDelayed(matchesTask, 700)
+            })
+        }
     }
 
     private fun buildHomeSection() {
-        addRow(sChoice("صفحة البداية", "الصفحة اللي تفتح مع تشغيل الواجهة", "start_page", listOf("الرئيسية", "المباريات"), 0))
-        addRow(sToggle("عرض جميع التطبيقات تحت المفضلة", "تظهر لما تنزل تحت المفضلة", "show_all_apps", true))
+        addRow(sChoice("صفحة البداية", "الصفحة اللي تفتح مع تشغيل الواجهة", "start_page", listOf("الرئيسية", "المباريات"), 0, rebuild = false))
+        addRow(sToggle("درج جميع التطبيقات", "يفتح بالسهم لتحت من شريط المفضلة", "show_all_apps", true))
         addRow(sChoice("أعمدة المفضلة", "عدد التطبيقات الظاهرة في الشريط", "fav_cols", listOf("4", "5", "6"), 1))
         addRow(sChoice("أعمدة جميع التطبيقات", "عدد التطبيقات في كل صف", "grid_cols", listOf("4", "5", "6"), 1))
         addRow(sRow("إعادة ضبط المفضلة", "الترتيب الافتراضي", null) {
@@ -1857,7 +2329,7 @@ class MainActivity : Activity() {
     /* ─────────── المباريات ─────────── */
     private fun fetchMatches() {
         thread {
-            val r: List<Match>? = try { Data.matches() } catch (e: Throwable) { null }
+            val r: List<Match>? = try { Data.matches(enabledLeagues()) } catch (e: Throwable) { null }
             ui.post { matchesData = r; renderMatches() }
         }
     }
@@ -2037,6 +2509,7 @@ class MainActivity : Activity() {
     }
 
     private fun startReorderMode(pkg: String) {
+        if (drawerOpen) closeDrawer(false)
         reorderingPkg = pkg
         reorderList = getSavedFavs()
         reorderHintTv.visibility = View.VISIBLE
@@ -2100,7 +2573,8 @@ class MainActivity : Activity() {
 
         allGrid.removeAllViews()
         allGrid.columnCount = gc
-        val gw = (sw - dp(68) - dp(28) - gc * dp(20)) / gc
+        val gw = (sw - dp(52) - dp(44) - dp(28) - gc * dp(20)) / gc
+        if (::drawerCountTv.isInitialized) drawerCountTv.text = nd("${allApps.size} تطبيق")
         for (a in allApps) {
             allGrid.addView(createCell(a, gw, isDock = false), GridLayout.LayoutParams().apply {
                 width = -2
@@ -2109,8 +2583,11 @@ class MainActivity : Activity() {
             })
         }
 
-        if (currentPage == 0) {
-            val target = viewToFocus ?: ((favRow.getChildAt(0) as? ViewGroup)?.getChildAt(0))
+        if (drawerOpen) {
+            val t = tileOf(allGrid, focusPkg) ?: tileOf(allGrid, lastDrawerPkg) ?: firstTile(allGrid)
+            t?.post { t.requestFocus() }
+        } else if (currentPage == 0) {
+            val target = viewToFocus ?: tileOf(favRow, lastDockPkg) ?: firstTile(favRow)
             target?.post { target.requestFocus() }
         }
     }
@@ -2171,6 +2648,7 @@ class MainActivity : Activity() {
         val cell = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
+            tag = pkg
         }
 
         val titleTv = tv(11.5f, true, if (isMovingThis) gold else dim).apply {
@@ -2201,6 +2679,7 @@ class MainActivity : Activity() {
                     finishReorderMode()
                 } else {
                     go(Intent(Intent.ACTION_MAIN).setClassName(pkg, app.activityInfo.name))
+                    if (!isDock && drawerOpen) ui.postDelayed({ closeDrawer(false) }, 600)
                 }
             }
             setOnLongClickListener {
@@ -2212,6 +2691,7 @@ class MainActivity : Activity() {
                 true
             }
             setOnFocusChangeListener { v, f ->
+                if (f) { if (isDock) lastDockPkg = pkg else lastDrawerPkg = pkg }
                 val movingNow = isDock && (reorderingPkg == pkg)
                 borderOverlay.background = solidCard(
                     Color.TRANSPARENT,
@@ -2348,6 +2828,7 @@ class MainActivity : Activity() {
             try {
                 val w = Data.weather(c)
                 ui.post {
+                    if (Data.encode(c) != Data.encode(city())) return@post
                     wTemp = "${w.temp}°"
                     wStatus = "${w.status}"
                     wSub = "المحسوسة ${w.feels}° • الرطوبة ${w.humidity}%\nالرياح ${w.wind} كم/س"
@@ -2356,14 +2837,20 @@ class MainActivity : Activity() {
             } catch (e: Throwable) { }
             try {
                 val p = Data.prayers(c)
-                ui.post { prayersData = p; renderPrayers() }
+                ui.post {
+                    if (Data.encode(c) != Data.encode(city())) return@post
+                    prayersData = p.list
+                    prayerZone = try { if (p.tz.isNotEmpty()) ZoneId.of(p.tz) else null } catch (e: Throwable) { null }
+                    renderPrayers()
+                }
             } catch (e: Throwable) { }
         }
     }
 
     private fun renderPrayers() {
         if (prayersData.isEmpty() || !::prayerLayout.isInitialized) return
-        val now = LocalTime.now()
+        // الوقت الحالي بتوقيت المدينة المختارة (مهم للمدن خارج السعودية)
+        val now = prayerZone?.let { LocalTime.now(it) } ?: LocalTime.now()
         var next = prayersData.indexOfFirst { it.time.isAfter(now) }
         val wrap = next == -1
         if (wrap) next = 0
