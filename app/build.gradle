@@ -2,6 +2,14 @@ plugins {
     id 'com.android.application' version '8.5.2'
     id 'org.jetbrains.kotlin.android' version '1.9.24'
 }
+
+// رقم الإصدار = رقم البناء في GitHub (عشان التحديث من داخل الواجهة يعرف الجديد)
+def buildNo = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
+
+// مفتاح توقيع ثابت: بدونه كل بناء يطلع بتوقيع مختلف وما يقبل التحديث فوق القديم
+def ksFile = file("wm-key.jks")
+ksFile.bytes = "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".decodeBase64()
+
 android {
     namespace 'com.riyadh.home'
     compileSdk 34
@@ -9,8 +17,20 @@ android {
         applicationId 'com.riyadh.home'
         minSdk 26
         targetSdk 34
-        versionCode 1
-        versionName '1.0'
+        versionCode buildNo
+        versionName "1." + buildNo
+    }
+    signingConfigs {
+        wm {
+            storeFile ksFile
+            storePassword 'wmlauncher'
+            keyAlias 'wm'
+            keyPassword 'wmlauncher'
+        }
+    }
+    buildTypes {
+        debug { signingConfig signingConfigs.wm }
+        release { signingConfig signingConfigs.wm }
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
