@@ -103,26 +103,45 @@ class WmAmbient(c: Context, initial: Int) : View(c) {
         anim.start()
     }
 
+    // الظلال تُبنى مرة وحدة وتتحرك بمصفوفة بدل إنشائها كل إطار (يمنع التقطيع)
+    private var bgShader: Shader? = null
+    private var g1: RadialGradient? = null
+    private var g2: RadialGradient? = null
+    private var builtW = 0f
+    private var builtH = 0f
+    private var builtColor = 0
+    private var builtBase: IntArray? = null
+    private val m1 = Matrix()
+    private val m2 = Matrix()
+    private val p1 = Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG)
+    private val p2 = Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG)
+
     override fun onDraw(cv: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
-
-        val r = Color.red(color)
-        val g = Color.green(color)
-        val b = Color.blue(color)
-
+        if (bgShader == null || w != builtW || h != builtH || builtBase !== base) {
+            bgShader = LinearGradient(0f, 0f, w, h, base, floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP)
+            builtBase = base
+            g1 = null
+        }
+        if (g1 == null || builtColor != color || w != builtW || h != builtH) {
+            val r = Color.red(color); val g = Color.green(color); val b = Color.blue(color)
+            g1 = RadialGradient(0f, 0f, w * 0.6f, intArrayOf(Color.argb(90, r, g, b), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
+            g2 = RadialGradient(0f, 0f, w * 0.5f, intArrayOf(Color.argb(70, r, g, b), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
+            p1.shader = g1
+            p2.shader = g2
+            builtColor = color
+        }
+        builtW = w; builtH = h
         val dx = Math.sin(phase.toDouble()).toFloat() * w * 0.02f
         val dy = Math.cos(phase.toDouble()).toFloat() * h * 0.02f
-
-        paint.shader = LinearGradient(0f, 0f, w, h, base, floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP)
+        paint.shader = bgShader
         cv.drawRect(0f, 0f, w, h, paint)
-
-        paint.shader = RadialGradient(w * 0.25f + dx, h * 0.15f + dy, w * 0.6f, intArrayOf(Color.argb(90, r, g, b), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
-        cv.drawRect(0f, 0f, w, h, paint)
-
-        paint.shader = RadialGradient(w * 0.85f - dx, h * 0.2f - dy, w * 0.5f, intArrayOf(Color.argb(70, r, g, b), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
-        cv.drawRect(0f, 0f, w, h, paint)
+        m1.setTranslate(w * 0.25f + dx, h * 0.15f + dy); g1?.setLocalMatrix(m1)
+        cv.drawRect(0f, 0f, w, h, p1)
+        m2.setTranslate(w * 0.85f - dx, h * 0.2f - dy); g2?.setLocalMatrix(m2)
+        cv.drawRect(0f, 0f, w, h, p2)
     }
 }
 
@@ -325,11 +344,13 @@ class MainActivity : Activity() {
 
     // درج جميع التطبيقات
     private lateinit var rootFrame: FrameLayout
+    private var host: FrameLayout? = null
     private lateinit var homeRoot: LinearLayout
     private lateinit var drawerView: FrameLayout
     private lateinit var drawerPanel: LinearLayout
     private lateinit var drawerScroll: ScrollView
     private lateinit var drawerCountTv: TextView
+    private lateinit var drawerScrim: View
     private var drawerOpen = false
     private var lastDockPkg: String? = null
     private var lastDrawerPkg: String? = null
@@ -387,7 +408,8 @@ class MainActivity : Activity() {
 
     // التحديث
     private class UpdateInfo(val code: Int, val name: String, val apk: String, val notes: String)
-    private val updateUrl = "https://raw.githubusercontent.com/weli54520-sketch/Wapeed-home/main/version.json"
+    private val updateUrl = "https://api.github.com/repos/weli54520-sketch/Wapeed-home/releases/latest"
+    private val updateTask = Runnable { checkUpdate(silent = true) }
     private val installAction = "com.riyadh.home.INSTALL_RESULT"
     private var updateInfo: UpdateInfo? = null
     private var updateMsg = ""
@@ -416,8 +438,8 @@ class MainActivity : Activity() {
     private fun panelOpacity() = (100 - pInt("panel_clear", 30)).coerceIn(0, 100)
     private fun borderPct() = pInt("border_strength", 50)
     private fun borderSharp() = pInt("border_style", 0) == 1
-    private fun focusSharp() = pInt("focus_style", 0) == 0
-    private fun focusGlassPct() = pInt("focus_glass", 60)
+    private fun focusSharp() = pInt("focus_style", 1) == 0
+    private fun focusGlassPct() = pInt("focus_glass", 50)
     private fun focusScale() = when (pInt("focus_scale", 1)) { 0 -> 1.05f; 2 -> 1.14f; else -> 1.09f }
     private fun favCols() = listOf(4, 5, 6)[pInt("fav_cols", 1).coerceIn(0, 2)]
     private fun gridCols() = listOf(4, 5, 6)[pInt("grid_cols", 1).coerceIn(0, 2)]
@@ -533,8 +555,8 @@ class MainActivity : Activity() {
         val fa = (focusGlassPct() * 2.55f).toInt().coerceIn(30, 255)
         return WmGlass(
             dp(radius).toFloat(), dp(2).toFloat(),
-            Color.argb((fa * 0.55f).toInt(), 255, 255, 255), Color.argb((fa * 0.35f).toInt(), 210, 225, 255),
-            Color.argb(255, 255, 255, 255), true, 60
+            Color.argb((fa * 0.34f).toInt(), 255, 255, 255), Color.argb((fa * 0.14f).toInt(), 210, 225, 255),
+            Color.argb(255, 255, 255, 255), true, 46
         )
     }
 
@@ -657,6 +679,7 @@ class MainActivity : Activity() {
             fetchMatches()
             updateClock()
             refreshFeeds()
+            ui.postDelayed(updateTask, 8000)
         } catch (e: Throwable) {
             setContentView(TextView(this).apply { text = "خطأ: $e"; textSize = 20f; setTextColor(Color.RED); setPadding(40, 40, 40, 40) })
         }
@@ -755,7 +778,8 @@ class MainActivity : Activity() {
         openPicker = null
         drawerView = buildDrawer()
         frame.addView(drawerView, FrameLayout.LayoutParams(-1, -1))
-        setContentView(frame)
+        val h = host ?: FrameLayout(this).also { host = it; setContentView(it) }
+        h.addView(frame, FrameLayout.LayoutParams(-1, -1))
         showPage(startPage, animate)
     }
 
@@ -768,20 +792,15 @@ class MainActivity : Activity() {
         val page = currentPage
         val sec = currentSection
         val row = lastFocusedRow
-        // صورة من الواجهة الحالية نخفيها تدريجياً فوق الجديدة (انتقال ناعم بدل الوميض)
-        var snap: Bitmap? = null
-        try {
-            if (::rootFrame.isInitialized && rootFrame.width > 0 && rootFrame.height > 0) {
-                snap = Bitmap.createBitmap(rootFrame.width, rootFrame.height, Bitmap.Config.ARGB_8888)
-                rootFrame.draw(Canvas(snap))
-            }
-        } catch (e: Throwable) { snap = null }
+        // الواجهة القديمة تبقى تحت والجديدة تظهر فوقها تدريجياً ثم نشيل القديمة (بدون وميض)
+        val old: FrameLayout? = if (::rootFrame.isInitialized) rootFrame else null
+        old?.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
         buildInterface(page, false)
-        snap?.let { b ->
-            val iv = ImageView(this).apply { setImageBitmap(b); scaleType = ImageView.ScaleType.FIT_XY }
-            rootFrame.addView(iv, FrameLayout.LayoutParams(-1, -1))
-            iv.animate().alpha(0f).setDuration(340).setInterpolator(DecelerateInterpolator())
-                .withEndAction { (iv.parent as? ViewGroup)?.removeView(iv) }.start()
+        val fresh = rootFrame
+        if (old != null && old !== fresh) {
+            fresh.alpha = 0f
+            fresh.animate().alpha(1f).setDuration(260).setInterpolator(DecelerateInterpolator()).withLayer()
+                .withEndAction { host?.removeView(old) }.start()
         }
         lastMin = -1
         updateClock()
@@ -805,7 +824,7 @@ class MainActivity : Activity() {
                 if (animate) {
                     p.alpha = 0f
                     p.translationY = dp(12).toFloat()
-                    p.animate().alpha(1f).translationY(0f).setDuration(260).start()
+                    p.animate().alpha(1f).translationY(0f).setDuration(240).setInterpolator(DecelerateInterpolator(1.6f)).withLayer().start()
                 } else {
                     p.alpha = 1f
                     p.translationY = 0f
@@ -1169,9 +1188,11 @@ class MainActivity : Activity() {
             visibility = View.GONE
             layoutDirection = View.LAYOUT_DIRECTION_RTL
         }
-        d.addView(View(this).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.argb(90, 0, 0, 0), Color.argb(200, 0, 0, 0)))
-        }, FrameLayout.LayoutParams(-1, -1))
+        drawerScrim = View(this).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.argb(130, 0, 0, 0), Color.argb(215, 0, 0, 0)))
+            alpha = 0f
+        }
+        d.addView(drawerScrim, FrameLayout.LayoutParams(-1, -1))
 
         drawerPanel = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.VERTICAL
@@ -1226,18 +1247,18 @@ class MainActivity : Activity() {
         if (allGrid.childCount == 0) loadAppsAndDock()
         drawerOpen = true
         val h = (if (rootFrame.height > 0) rootFrame.height else resources.displayMetrics.heightPixels).toFloat()
-        drawerView.animate().cancel()
+        drawerScrim.animate().cancel()
         drawerPanel.animate().cancel()
         drawerView.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
         if (drawerView.visibility != View.VISIBLE) {
-            drawerView.alpha = 0f
-            drawerPanel.translationY = h * 0.45f
+            drawerScrim.alpha = 0f
+            drawerPanel.translationY = h
             drawerScroll.scrollTo(0, 0)
+            drawerView.visibility = View.VISIBLE
         }
-        drawerView.visibility = View.VISIBLE
-        drawerView.animate().alpha(1f).setDuration(220).start()
-        drawerPanel.animate().translationY(0f).setDuration(380).setInterpolator(DecelerateInterpolator(2.4f)).withLayer().start()
-        homeRoot.animate().scaleX(0.94f).scaleY(0.94f).alpha(0.3f).setDuration(340).setInterpolator(DecelerateInterpolator()).start()
+        // الحركة على خيط الرسم مباشرة (translation فقط) = سلسة حتى على الأجهزة الضعيفة
+        drawerScrim.animate().alpha(1f).setDuration(260).start()
+        drawerPanel.animate().translationY(0f).setDuration(340).setInterpolator(DecelerateInterpolator(2.2f)).start()
         val target = tileOf(allGrid, lastDrawerPkg) ?: firstTile(allGrid)
         target?.requestFocus()
         homeRoot.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
@@ -1248,20 +1269,18 @@ class MainActivity : Activity() {
         drawerOpen = false
         homeRoot.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
         drawerView.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+        if (currentPage == 0) (tileOf(favRow, lastDockPkg) ?: firstTile(favRow))?.requestFocus()
         if (animate) {
             val h = (if (rootFrame.height > 0) rootFrame.height else resources.displayMetrics.heightPixels).toFloat()
-            drawerPanel.animate().translationY(h * 0.45f).setDuration(260).setInterpolator(AccelerateInterpolator(1.5f)).withLayer().start()
-            drawerView.animate().alpha(0f).setDuration(260).withEndAction { if (!drawerOpen) drawerView.visibility = View.GONE }.start()
-            homeRoot.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(300).setInterpolator(DecelerateInterpolator()).start()
+            drawerPanel.animate().translationY(h).setDuration(280).setInterpolator(AccelerateInterpolator(1.4f))
+                .withEndAction { if (!drawerOpen) drawerView.visibility = View.GONE }.start()
+            drawerScrim.animate().alpha(0f).setDuration(260).start()
         } else {
-            drawerView.animate().cancel()
+            drawerScrim.animate().cancel()
             drawerPanel.animate().cancel()
-            homeRoot.animate().cancel()
             drawerView.visibility = View.GONE
-            drawerView.alpha = 0f
-            homeRoot.scaleX = 1f; homeRoot.scaleY = 1f; homeRoot.alpha = 1f
+            drawerScrim.alpha = 0f
         }
-        if (currentPage == 0) (tileOf(favRow, lastDockPkg) ?: firstTile(favRow))?.requestFocus()
     }
 
     private fun buildMatchesPage(): View {
@@ -1727,31 +1746,65 @@ class MainActivity : Activity() {
         updateSubTv?.text = m
     }
 
-    private fun checkUpdate() {
+    // يقرأ آخر إصدار من GitHub مباشرة (رقم الإصدار = رقم البناء)
+    private fun checkUpdate(silent: Boolean = false) {
         if (downloading) return
-        setUpdateMsg("جاري التحقق...")
+        if (!silent) setUpdateMsg("جاري التحقق...")
+        ui.removeCallbacks(updateTask)
+        ui.postDelayed(updateTask, 6 * 60 * 60 * 1000L)
         thread {
             try {
-                val conn = URL(updateUrl + "?t=" + System.currentTimeMillis()).openConnection() as HttpURLConnection
+                val conn = URL(updateUrl).openConnection() as HttpURLConnection
                 conn.connectTimeout = 8000
                 conn.readTimeout = 8000
-                val txt = conn.inputStream.bufferedReader().use { it.readText() }
-                val j = JSONObject(txt)
-                val info = UpdateInfo(j.optInt("code", 0), j.optString("name", ""), j.optString("apk", ""), j.optString("notes", ""))
+                conn.setRequestProperty("Accept", "application/vnd.github+json")
+                conn.setRequestProperty("User-Agent", "WM-Launcher")
+                val j = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                val tag = j.optString("tag_name", "")
+                val code = tag.filter { it.isDigit() }.toIntOrNull() ?: 0
+                var apk = ""
+                val assets = j.optJSONArray("assets")
+                if (assets != null) for (i in 0 until assets.length()) {
+                    val a = assets.getJSONObject(i)
+                    if (a.optString("name").endsWith(".apk")) { apk = a.optString("browser_download_url"); break }
+                }
+                val info = UpdateInfo(code, tag, apk, j.optString("body", "").take(120))
                 ui.post {
                     if (info.code > curVersionCode() && info.apk.isNotEmpty()) {
                         updateInfo = info
                         setUpdateMsg("يوجد إصدار جديد: ${info.name}")
+                        if (silent) offerUpdate(info)
                     } else {
                         updateInfo = null
-                        setUpdateMsg("أنت على آخر إصدار ✓")
+                        if (!silent) setUpdateMsg("أنت على آخر إصدار ✓")
                     }
                     if (currentPage == 2 && currentSection == 6) refreshSection()
                 }
             } catch (e: Throwable) {
-                ui.post { setUpdateMsg("تعذر التحقق، تأكد من الاتصال ومن رابط التحديث") }
+                if (!silent) ui.post { setUpdateMsg("تعذر التحقق، تأكد من الاتصال بالإنترنت") }
             }
         }
+    }
+
+    // نافذة صغيرة تعرض التحديث الجديد (مرة وحدة لكل إصدار)
+    private fun offerUpdate(info: UpdateInfo) {
+        if (prefs.getInt("update_offered", 0) == info.code || isFinishing) return
+        prefs.edit().putInt("update_offered", info.code).apply()
+        val (dialog, box) = shell()
+        box.addView(tv(19f, true, accent).apply { text = "⬇️  تحديث جديد للواجهة"; setPadding(0, 0, 0, dp(6)) })
+        box.addView(tv(13f, false, dim).apply {
+            text = nd("الإصدار ${info.name} جاهز (عندك ${curVersionCode()})")
+            setPadding(0, 0, 0, dp(14))
+        })
+        box.addView(optionRow("تحديث الآن") {
+            dialog.dismiss()
+            currentSection = 6
+            showPage(2)
+            startUpdate()
+        }, LinearLayout.LayoutParams(dp(340), -2).apply { bottomMargin = dp(8) })
+        box.addView(optionRow("لاحقاً") { dialog.dismiss() }, LinearLayout.LayoutParams(dp(340), -2))
+        dialog.setContentView(box)
+        try { dialog.show() } catch (e: Throwable) { }
     }
 
     private fun startUpdate() {
@@ -1800,7 +1853,7 @@ class MainActivity : Activity() {
             } catch (e: Throwable) {
                 ui.post {
                     downloading = false
-                    setUpdateMsg("فشل التحميل، تأكد من رابط الـ APK والاتصال")
+                    setUpdateMsg("فشل التحميل، تأكد من الاتصال وحاول مرة ثانية")
                 }
             }
         }
@@ -1953,7 +2006,7 @@ class MainActivity : Activity() {
             settingsContent.animate().cancel()
             settingsContent.alpha = 0f
             settingsContent.translationX = -dp(18).toFloat()
-            settingsContent.animate().alpha(1f).translationX(0f).setDuration(230).setInterpolator(DecelerateInterpolator(1.6f)).start()
+            settingsContent.animate().alpha(1f).translationX(0f).setDuration(220).setInterpolator(DecelerateInterpolator(1.6f)).withLayer().start()
             settingsTitleTv.alpha = 0.3f
             settingsTitleTv.animate().alpha(1f).setDuration(230).start()
         }
@@ -2080,7 +2133,11 @@ class MainActivity : Activity() {
     }
 
     private fun buildChip(label: String, swatch: Int?, selected: Boolean): LinearLayout {
-        val txt = tv(13.5f, true, if (selected) accent else Color.WHITE).apply { text = if (selected) "✓  $label" else label }
+        val txt = tv(13.5f, true, if (selected) accent else Color.WHITE).apply {
+            text = if (selected) "✓ $label" else label
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
         fun idle(): Drawable = slateGlass(if (selected) 215 else 150, 22, if (selected) accent else Color.argb(40, 255, 255, 255), 1)
         return LinearLayout(this).unclip().apply {
             orientation = LinearLayout.HORIZONTAL
@@ -2099,7 +2156,7 @@ class MainActivity : Activity() {
                 v.background = if (f) focusBg(22) else idle()
                 txt.setTextColor(if (f) focusFg() else if (selected) accent else Color.WHITE)
                 v.translationZ = if (f) dp(8).toFloat() else 0f
-                v.animate().scaleX(if (f) 1.08f else 1f).scaleY(if (f) 1.08f else 1f).setDuration(130).start()
+                v.animate().scaleX(if (f) 1.05f else 1f).scaleY(if (f) 1.05f else 1f).setDuration(130).start()
             }
         }
     }
@@ -2111,27 +2168,23 @@ class MainActivity : Activity() {
             closePicker(true)
             if (owner === row) return
         }
-        val strip = LinearLayout(this).unclip().apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10), dp(12), dp(10), dp(12))
-        }
-        val hs = HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            overScrollMode = View.OVER_SCROLL_NEVER
-            clipToPadding = false
-            addView(strip)
-        }
         val ac = accent
-        val panel = LinearLayout(this).unclip().apply {
+        val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = slateGlass(190, 18, Color.argb(120, Color.red(ac), Color.green(ac), Color.blue(ac)), 1)
-            setPadding(dp(8), dp(2), dp(8), dp(2))
+            setPadding(dp(14), dp(10), dp(14), dp(10))
             tag = row
-            addView(hs, LinearLayout.LayoutParams(-1, -2))
+            clipChildren = true
         }
+        // نوزع الخيارات على صفوف (4 بكل صف) داخل حدود اللوحة فقط
+        val perRow = 4
         var curChip: View? = null
+        var line: LinearLayout? = null
         opts.forEachIndexed { i, o ->
+            if (i % perRow == 0) {
+                line = LinearLayout(this).unclip().apply { orientation = LinearLayout.HORIZONTAL }
+                panel.addView(line, LinearLayout.LayoutParams(-1, -2).apply { topMargin = if (i == 0) 0 else dp(10) })
+            }
             val chip = buildChip(o, swatches?.getOrNull(i), i == cur)
             chip.setOnClickListener {
                 closePicker(true)
@@ -2139,20 +2192,38 @@ class MainActivity : Activity() {
             }
             chip.setOnKeyListener { v, code, ev ->
                 when (code) {
-                    KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    KeyEvent.KEYCODE_BACK -> {
                         if (ev.action == KeyEvent.ACTION_DOWN && ev.repeatCount == 0) closePicker(true)
                         true
                     }
-                    KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                        // لا نخلي التحديد يطلع من الشريط للقائمة الجانبية
-                        val n = v.focusSearch(if (code == KeyEvent.KEYCODE_DPAD_LEFT) View.FOCUS_LEFT else View.FOCUS_RIGHT)
-                        n == null || n.parent !== strip
+                    KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                        val dir = when (code) {
+                            KeyEvent.KEYCODE_DPAD_UP -> View.FOCUS_UP
+                            KeyEvent.KEYCODE_DPAD_DOWN -> View.FOCUS_DOWN
+                            KeyEvent.KEYCODE_DPAD_LEFT -> View.FOCUS_LEFT
+                            else -> View.FOCUS_RIGHT
+                        }
+                        val n = v.focusSearch(dir)
+                        if (n != null && isInside(n, panel)) false
+                        else {
+                            // فوق/تحت خارج الخيارات يقفل الشريط، ويمين/يسار ما يطلع للقائمة الجانبية
+                            if (ev.action == KeyEvent.ACTION_DOWN && ev.repeatCount == 0 &&
+                                (code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_DOWN)) closePicker(true)
+                            true
+                        }
                     }
                     else -> false
                 }
             }
-            strip.addView(chip, LinearLayout.LayoutParams(-2, dp(42)).apply { marginEnd = dp(10) })
+            line?.addView(chip, LinearLayout.LayoutParams(0, dp(42), 1f).apply {
+                marginStart = dp(5); marginEnd = dp(5)
+            })
             if (i == cur) curChip = chip
+        }
+        // نكمل آخر صف بفراغات عشان كل الخيارات بنفس العرض
+        val rem = opts.size % perRow
+        if (rem != 0 && opts.size > perRow) repeat(perRow - rem) {
+            line?.addView(View(this), LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(5); marginEnd = dp(5) })
         }
         val idx = settingsContent.indexOfChild(row)
         settingsContent.layoutTransition = pickerTransition()
@@ -2163,7 +2234,7 @@ class MainActivity : Activity() {
         panel.scaleY = 0.7f
         panel.translationY = -dp(8).toFloat()
         panel.animate().alpha(1f).scaleY(1f).translationY(0f).setDuration(240).setInterpolator(DecelerateInterpolator(1.8f)).start()
-        val focusChip = curChip ?: strip.getChildAt(0)
+        val focusChip = curChip
         panel.post { focusChip?.requestFocus() }
         ui.postDelayed({ if (openPicker === panel) settingsContent.layoutTransition = null }, 320)
     }
@@ -2232,8 +2303,8 @@ class MainActivity : Activity() {
         addRow(sSlider("قوة الحدود", "◀ ▶ للتغيير", "border_strength", 0, 100, 10, 50))
         addRow(sSlider("نسبة الشفافية", "كلما زادت صارت اللوحات أشفّ ◀ ▶", "panel_clear", 0, 90, 10, 30))
         addHeader("التحديد عند التنقل بالريموت")
-        addRow(sChoice("نمط التحديد", "أبيض حاد أو زجاجي", "focus_style", listOf("حاد (أبيض)", "زجاجي"), 0))
-        addRow(sSlider("نسبة زجاج التحديد", "تظهر مع النمط الزجاجي ◀ ▶", "focus_glass", 10, 100, 10, 60))
+        addRow(sChoice("نمط التحديد", "زجاجي شفاف أو أبيض حاد", "focus_style", listOf("حاد (أبيض)", "زجاجي"), 1))
+        addRow(sSlider("نسبة زجاج التحديد", "تظهر مع النمط الزجاجي ◀ ▶", "focus_glass", 10, 100, 10, 50))
         addRow(sChoice("حجم تكبير التحديد", "", "focus_scale", listOf("صغير", "متوسط", "كبير"), 1))
         addHeader("خلفية خاصة")
         addRow(sRow("صورة خلفية خاصة", "ضع رابط صورة مباشر", null) { showBgUrlDialog() })
@@ -2477,6 +2548,18 @@ class MainActivity : Activity() {
         p.strokeWidth = 2f
         p.color = Color.WHITE
         canvas.drawCircle(size / 2f, size / 2f, size / 2f - 2, p)
+        // أول حرف من اسم النادي (بدون "ال") عشان يبان شي بدل الدائرة الفاضية
+        val clean = name.trim().removePrefix("ال").trim()
+        val letter = clean.take(1)
+        if (letter.isNotEmpty()) {
+            val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                textAlign = Paint.Align.CENTER
+                typeface = Typeface.DEFAULT_BOLD
+                textSize = size * 0.46f
+            }
+            canvas.drawText(letter, size / 2f, size / 2f - (tp.descent() + tp.ascent()) / 2f, tp)
+        }
         return BitmapDrawable(resources, bmp)
     }
 

@@ -301,6 +301,14 @@ object Data {
         "al ahli jeddah" to "الأهلي", "al ittihad jeddah" to "الاتحاد", "al taawon" to "التعاون", "monaco" to "موناكو", "club brugge" to "كلوب بروج", "celtic" to "سلتيك"
     )
 
+    // إذا ما فيه شعار في الرد، نجرب رابط ESPN المباشر برقم النادي
+    private fun logo(t: JSONObject): String {
+        val l = t.optString("logo", "")
+        if (l.isNotEmpty()) return l
+        val id = t.optString("id", "")
+        return if (id.isNotEmpty()) "https://a.espncdn.com/i/teamlogos/soccer/500/$id.png" else ""
+    }
+
     private fun ar(t: JSONObject): String {
         val full = t.optString("displayName", "")
         val short = t.optString("shortDisplayName", "")
@@ -347,7 +355,7 @@ object Data {
                     val st = ev.getJSONObject("status").getJSONObject("type")
                     val state = st.optString("state", "pre")
                     out.add(Match(
-                        lg.name.replace(" (الغرب)", ""), ar(ht), ht.optString("logo", ""), ar(at), at.optString("logo", ""),
+                        lg.name.replace(" (الغرب)", ""), ar(ht), logo(ht), ar(at), logo(at),
                         if (state == "pre") dt.format(fmt) else h.optString("score", "0") + " - " + a.optString("score", "0"),
                         when (state) { "in" -> st.optString("shortDetail", "مباشر"); "post" -> "انتهت"; else -> "" },
                         state == "in", dt
