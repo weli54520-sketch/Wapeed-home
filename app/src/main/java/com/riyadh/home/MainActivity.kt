@@ -1,3 +1,4 @@
+// WM Launcher — نسخة الكود رقم 4
 package com.riyadh.home
 
 import android.animation.ArgbEvaluator
@@ -192,6 +193,66 @@ class WmGlass(
             val rr = (radius - h).coerceAtLeast(0f)
             c.drawRoundRect(inset, rr, rr, line)
         }
+    }
+
+    override fun setAlpha(alpha: Int) {}
+    override fun setColorFilter(colorFilter: ColorFilter?) {}
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+}
+
+/* ───────────────────────── تحديد زجاجي متحرك ───────────────────────── */
+class WmFocusGlass(private val radius: Float, private val strokePx: Float, private val strength: Int) : Drawable() {
+    var phase = 0f
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val shine = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private val glow = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private val rect = RectF()
+    private val inset = RectF()
+    private val clip = Path()
+    private val m = Matrix()
+    private var bandW = 1f
+
+    override fun onBoundsChange(b: Rect) {
+        super.onBoundsChange(b)
+        rect.set(b)
+        val a = strength.coerceIn(20, 100) / 100f
+        fill.shader = LinearGradient(0f, rect.top, 0f, rect.bottom,
+            Color.argb((95 * a).toInt(), 255, 255, 255), Color.argb((38 * a).toInt(), 200, 220, 255), Shader.TileMode.CLAMP)
+        bandW = rect.width() * 0.45f
+        shine.shader = LinearGradient(0f, 0f, bandW, 0f,
+            intArrayOf(Color.TRANSPARENT, Color.argb((85 * a).toInt() + 20, 255, 255, 255), Color.TRANSPARENT),
+            floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP)
+        ring.strokeWidth = strokePx
+        glow.strokeWidth = strokePx * 3.2f
+        val h = strokePx / 2f
+        inset.set(rect.left + h, rect.top + h, rect.right - h, rect.bottom - h)
+        clip.reset()
+        clip.addRoundRect(rect, radius, radius, Path.Direction.CW)
+    }
+
+    override fun draw(c: Canvas) {
+        if (bounds.isEmpty) return
+        c.drawRoundRect(rect, radius, radius, fill)
+        // لمعة خفيفة تمر على الزجاج
+        val t = (phase % 1f)
+        if (t < 0.55f) {
+            val x = rect.left - bandW + (rect.width() + bandW * 2f) * (t / 0.55f)
+            m.setTranslate(x, 0f)
+            shine.shader?.setLocalMatrix(m)
+            c.save()
+            c.clipPath(clip)
+            c.drawRect(rect, shine)
+            c.restore()
+        }
+        // إطار يتنفس بهدوء
+        val breathe = 0.5f + 0.5f * Math.sin(phase * Math.PI * 2).toFloat()
+        glow.color = Color.argb((26 + 34 * breathe).toInt(), 255, 255, 255)
+        val rr = (radius - strokePx / 2f).coerceAtLeast(0f)
+        c.drawRoundRect(inset, rr, rr, glow)
+        ring.color = Color.argb((190 + 65 * breathe).toInt(), 255, 255, 255)
+        c.drawRoundRect(inset, rr, rr, ring)
     }
 
     override fun setAlpha(alpha: Int) {}
@@ -438,7 +499,7 @@ class MainActivity : Activity() {
     private fun panelOpacity() = (100 - pInt("panel_clear", 30)).coerceIn(0, 100)
     private fun borderPct() = pInt("border_strength", 50)
     private fun borderSharp() = pInt("border_style", 0) == 1
-    private fun focusSharp() = pInt("focus_style", 1) == 0
+    private fun focusSharp() = pInt("focus_style2", 1) == 0
     private fun focusGlassPct() = pInt("focus_glass", 50)
     private fun focusScale() = when (pInt("focus_scale", 1)) { 0 -> 1.05f; 2 -> 1.14f; else -> 1.09f }
     private fun favCols() = listOf(4, 5, 6)[pInt("fav_cols", 1).coerceIn(0, 2)]
@@ -550,14 +611,24 @@ class MainActivity : Activity() {
         if (strokeDp > 0) setStroke(dp(strokeDp), strokeColor)
     }
 
+    // محرك واحد للحركة يحرّك التحديد الحالي فقط (خفيف جداً)
+    private var activeFocus: WmFocusGlass? = null
+    private val focusAnim: ValueAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+        duration = 3200
+        repeatCount = ValueAnimator.INFINITE
+        interpolator = android.view.animation.LinearInterpolator()
+        addUpdateListener { va ->
+            activeFocus?.let { it.phase = va.animatedValue as Float; it.invalidateSelf() }
+        }
+    }
+
     private fun focusBg(radius: Int): Drawable {
         if (focusSharp()) return solidCard(Color.WHITE, radius)
-        val fa = (focusGlassPct() * 2.55f).toInt().coerceIn(30, 255)
-        return WmGlass(
-            dp(radius).toFloat(), dp(2).toFloat(),
-            Color.argb((fa * 0.34f).toInt(), 255, 255, 255), Color.argb((fa * 0.14f).toInt(), 210, 225, 255),
-            Color.argb(255, 255, 255, 255), true, 46
-        )
+        val d = WmFocusGlass(dp(radius).toFloat(), dp(2).toFloat(), focusGlassPct())
+        d.phase = (focusAnim.animatedValue as? Float) ?: 0f
+        activeFocus = d
+        if (!focusAnim.isStarted) focusAnim.start()
+        return d
     }
 
     private fun focusFg(): Int = if (focusSharp()) darkText else Color.WHITE
@@ -680,18 +751,34 @@ class MainActivity : Activity() {
             updateClock()
             refreshFeeds()
             ui.postDelayed(updateTask, 8000)
+            val vc = curVersionCode()
+            val last = prefs.getInt("last_version", 0)
+            if (last in 1 until vc) Toast.makeText(this, nd("تم التحديث إلى الإصدار ${curVersionName()} ✓"), Toast.LENGTH_LONG).show()
+            if (last != vc) prefs.edit().putInt("last_version", vc).apply()
         } catch (e: Throwable) {
             setContentView(TextView(this).apply { text = "خطأ: $e"; textSize = 20f; setTextColor(Color.RED); setPadding(40, 40, 40, 40) })
         }
     }
 
     override fun onDestroy() {
+        focusAnim.cancel()
         ui.removeCallbacksAndMessages(null)
         super.onDestroy()
     }
 
+    override fun onPause() {
+        focusAnim.pause()
+        super.onPause()
+    }
+
     override fun onResume() {
         super.onResume()
+        if (focusAnim.isPaused) focusAnim.resume()
+        if (resumeUpdate) {
+            resumeUpdate = false
+            if (Build.VERSION.SDK_INT < 26 || packageManager.canRequestPackageInstalls()) ui.postDelayed({ startUpdate() }, 400)
+            else setUpdateMsg("ما تم السماح بالتثبيت، اضغط تحميل وتثبيت مرة ثانية")
+        }
         if (::favRow.isInitialized) loadAppsAndDock()
     }
 
@@ -919,7 +1006,7 @@ class MainActivity : Activity() {
                 setPadding(dp(18), dp(9), dp(18), dp(9))
                 isFocusable = true
                 isClickable = true
-                roundOutline(26)
+                outlineProvider = null
                 addView(txt)
                 setOnClickListener { showPage(i) }
                 setOnFocusChangeListener { v, f ->
@@ -942,6 +1029,27 @@ class MainActivity : Activity() {
         return h
     }
 
+    // يفتح/يقفل الكتابة جنب الأيقونة بحركة ناعمة (الأيقونة تبقى دايماً)
+    private fun setExpanded(extra: View, on: Boolean) {
+        (extra.tag as? ValueAnimator)?.cancel()
+        extra.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
+        val full = extra.measuredWidth
+        val lp = extra.layoutParams
+        val from = if (lp.width < 0) full else lp.width
+        val to = if (on) full else 0
+        val va = ValueAnimator.ofInt(from, to).apply {
+            duration = 240
+            interpolator = DecelerateInterpolator(1.6f)
+            addUpdateListener {
+                lp.width = it.animatedValue as Int
+                extra.layoutParams = lp
+            }
+        }
+        extra.tag = va
+        va.start()
+        extra.animate().alpha(if (on) 1f else 0f).setDuration(if (on) 260 else 140).start()
+    }
+
     private fun capsuleFocus(v: View, f: Boolean, title: TextView?, glyph: GlyphView) {
         v.background = if (f) focusBg(26) else slateGlass(185, 26, Color.argb(55, 255, 255, 255), 1)
         title?.setTextColor(if (f) focusFg() else Color.WHITE)
@@ -954,6 +1062,7 @@ class MainActivity : Activity() {
         val glyph = GlyphView(this, 0)
         val title = tv(13f, true, Color.WHITE).apply {
             text = "Wi-Fi"
+            setSingleLine(true)
             setPadding(dp(8), 0, dp(8), 0)
         }
         val badge = tv(10.5f, true, Color.WHITE).apply {
@@ -961,19 +1070,29 @@ class MainActivity : Activity() {
             background = solidCard(greenBadge, 12)
             setPadding(dp(8), dp(2), dp(8), dp(2))
         }
+        val extra = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            clipChildren = true
+            alpha = 0f
+            addView(title)
+            addView(badge)
+        }
         return LinearLayout(this).unclip().apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = slateGlass(185, 26, Color.argb(55, 255, 255, 255), 1)
-            setPadding(dp(14), dp(7), dp(12), dp(7))
+            setPadding(dp(10), dp(7), dp(10), dp(7))
             isFocusable = true
             isClickable = true
-            roundOutline(26)
+            outlineProvider = null
             addView(glyph, LinearLayout.LayoutParams(dp(22), dp(22)))
-            addView(title)
-            addView(badge)
+            addView(extra, LinearLayout.LayoutParams(0, -2))
             setOnClickListener { go(Intent(Settings.ACTION_WIFI_SETTINGS)) }
-            setOnFocusChangeListener { v, f -> capsuleFocus(v, f, title, glyph) }
+            setOnFocusChangeListener { v, f ->
+                capsuleFocus(v, f, title, glyph)
+                setExpanded(extra, f)
+            }
         }
     }
 
@@ -990,7 +1109,7 @@ class MainActivity : Activity() {
             setPadding(dp(14), dp(7), dp(14), dp(7))
             isFocusable = true
             isClickable = true
-            roundOutline(26)
+            outlineProvider = null
             addView(glyph, LinearLayout.LayoutParams(dp(22), dp(22)))
             addView(cityPillTv)
             setOnClickListener { openCityPicker() }
@@ -1002,20 +1121,31 @@ class MainActivity : Activity() {
         val glyph = GlyphView(this, kind)
         val title = tv(13f, true, Color.WHITE).apply {
             text = label
-            setPadding(dp(7), 0, dp(4), 0)
+            setSingleLine(true)
+            setPadding(dp(8), 0, dp(4), 0)
+        }
+        val extra = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            clipChildren = true
+            alpha = 0f
+            addView(title)
         }
         return LinearLayout(this).unclip().apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = slateGlass(185, 26, Color.argb(55, 255, 255, 255), 1)
-            setPadding(dp(14), dp(7), dp(14), dp(7))
+            setPadding(dp(10), dp(7), dp(10), dp(7))
             isFocusable = true
             isClickable = true
-            roundOutline(26)
+            outlineProvider = null
             addView(glyph, LinearLayout.LayoutParams(dp(22), dp(22)))
-            addView(title)
+            addView(extra, LinearLayout.LayoutParams(0, -2))
             setOnClickListener { onClick(this) }
-            setOnFocusChangeListener { v, f -> capsuleFocus(v, f, title, glyph) }
+            setOnFocusChangeListener { v, f ->
+                capsuleFocus(v, f, title, glyph)
+                setExpanded(extra, f)
+            }
         }
     }
 
@@ -1807,9 +1937,18 @@ class MainActivity : Activity() {
         try { dialog.show() } catch (e: Throwable) { }
     }
 
+    private var resumeUpdate = false
+
     private fun startUpdate() {
         val info = updateInfo ?: return
         if (downloading) return
+        // أول مرة: نطلب إذن تثبيت التطبيقات، ونكمل التحديث تلقائياً لما يرجع
+        if (Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
+            resumeUpdate = true
+            setUpdateMsg("فعّل «السماح» ثم ارجع بزر الرجوع، والتحديث يكمل لحاله")
+            go(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+            return
+        }
         downloading = true
         setUpdateMsg("جاري التحميل 0%")
         thread {
@@ -2145,7 +2284,7 @@ class MainActivity : Activity() {
             setPadding(dp(16), 0, dp(16), 0)
             isFocusable = true
             isClickable = true
-            roundOutline(22)
+            outlineProvider = null
             background = idle()
             if (swatch != null) {
                 addView(View(context).apply { background = solidCard(swatch, 9, Color.argb(200, 255, 255, 255), 1) },
@@ -2303,7 +2442,7 @@ class MainActivity : Activity() {
         addRow(sSlider("قوة الحدود", "◀ ▶ للتغيير", "border_strength", 0, 100, 10, 50))
         addRow(sSlider("نسبة الشفافية", "كلما زادت صارت اللوحات أشفّ ◀ ▶", "panel_clear", 0, 90, 10, 30))
         addHeader("التحديد عند التنقل بالريموت")
-        addRow(sChoice("نمط التحديد", "زجاجي شفاف أو أبيض حاد", "focus_style", listOf("حاد (أبيض)", "زجاجي"), 1))
+        addRow(sChoice("نمط التحديد", "زجاجي متحرك أو أبيض حاد", "focus_style2", listOf("حاد (أبيض)", "زجاجي متحرك"), 1))
         addRow(sSlider("نسبة زجاج التحديد", "تظهر مع النمط الزجاجي ◀ ▶", "focus_glass", 10, 100, 10, 50))
         addRow(sChoice("حجم تكبير التحديد", "", "focus_scale", listOf("صغير", "متوسط", "كبير"), 1))
         addHeader("خلفية خاصة")
@@ -2314,7 +2453,7 @@ class MainActivity : Activity() {
         })
         addRow(sRow("استعادة إعدادات المظهر الافتراضية", "لا يمس المفضلة", null) {
             val e = prefs.edit()
-            for (k in listOf("bg_palette", "accent_idx", "glass_tint", "border_style", "border_strength", "panel_clear", "focus_style", "focus_glass", "focus_scale")) e.remove(k)
+            for (k in listOf("bg_palette", "accent_idx", "glass_tint", "border_style", "border_strength", "panel_clear", "focus_style2", "focus_glass", "focus_scale")) e.remove(k)
             e.apply()
             scheduleRebuild()
         })
@@ -2432,9 +2571,9 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun miniLogo(name: String, url: String): ImageView {
+    private fun miniLogo(name: String, spec: String): ImageView {
         val iv = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_CENTER; setImageDrawable(crest(name)) }
-        if (url.isNotEmpty()) loadLogo(url, iv)
+        if (spec.isNotEmpty()) loadLogo(spec, iv)
         return iv
     }
 
@@ -2451,19 +2590,26 @@ class MainActivity : Activity() {
         return c
     }
 
+    // خلفية بطاقة المباراة: لون واحد شفاف خفيف + إطار رفيع (بدون طبقات داخلية)
+    private fun miniCardBg(): Drawable = GradientDrawable().apply {
+        setColor(Color.argb(26, 255, 255, 255))
+        cornerRadius = dp(20).toFloat()
+        setStroke(dp(1), Color.argb(48, 255, 255, 255))
+    }
+
     private fun miniMatch(m: Match): View {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = glass(165, 20, Color.argb(60, 255, 255, 255), 1)
+            background = miniCardBg()
             setPadding(dp(10), dp(8), dp(10), dp(8))
             isFocusable = true
             isClickable = true
-            roundOutline(20)
+            elevation = 0f
+            outlineProvider = null // بدون ظل: الظل كان يبان من خلف الزجاج كمربع داخلي
             setOnClickListener { showPage(1) }
             setOnFocusChangeListener { v, f ->
-                v.background = if (f) focusBg(20) else glass(165, 20, Color.argb(60, 255, 255, 255), 1)
+                v.background = if (f) focusBg(20) else miniCardBg()
                 v.translationZ = if (f) dp(10).toFloat() else 0f
-                v.elevation = if (f) 14f else 2f
                 v.animate()
                     .scaleX(if (f) focusScale() else 1f)
                     .scaleY(if (f) focusScale() else 1f)
@@ -2495,11 +2641,10 @@ class MainActivity : Activity() {
             setPadding(dp(16), dp(12), dp(16), dp(12))
             isFocusable = true
             isClickable = true
-            roundOutline(22)
+            outlineProvider = null
             setOnFocusChangeListener { v, f ->
                 v.background = if (f) focusBg(22) else slateGlass(210, 22, Color.argb(60, 255, 255, 255), 1)
                 v.translationZ = if (f) dp(16).toFloat() else 0f
-                v.elevation = if (f) 26f else 4f
                 v.animate()
                     .scaleX(if (f) focusScale() else 1f)
                     .scaleY(if (f) focusScale() else 1f)
@@ -2542,45 +2687,90 @@ class MainActivity : Activity() {
             name.contains("الأهلي") -> Color.parseColor("#006747")
             else -> Color.parseColor("#28354A")
         }
-        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = clubColor }
-        canvas.drawCircle(size / 2f, size / 2f, size / 2f - 2, p)
-        p.style = Paint.Style.STROKE
-        p.strokeWidth = 2f
-        p.color = Color.WHITE
-        canvas.drawCircle(size / 2f, size / 2f, size / 2f - 2, p)
-        // أول حرف من اسم النادي (بدون "ال") عشان يبان شي بدل الدائرة الفاضية
-        val clean = name.trim().removePrefix("ال").trim()
-        val letter = clean.take(1)
-        if (letter.isNotEmpty()) {
-            val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.WHITE
-                textAlign = Paint.Align.CENTER
-                typeface = Typeface.DEFAULT_BOLD
-                textSize = size * 0.46f
-            }
-            canvas.drawText(letter, size / 2f, size / 2f - (tp.descent() + tp.ascent()) / 2f, tp)
+        // درع بسيط مؤقت لين يوصل الشعار الحقيقي
+        val w = size.toFloat()
+        val shield = Path().apply {
+            moveTo(w * 0.5f, w * 0.06f)
+            lineTo(w * 0.88f, w * 0.2f)
+            lineTo(w * 0.84f, w * 0.58f)
+            quadTo(w * 0.78f, w * 0.82f, w * 0.5f, w * 0.95f)
+            quadTo(w * 0.22f, w * 0.82f, w * 0.16f, w * 0.58f)
+            lineTo(w * 0.12f, w * 0.2f)
+            close()
         }
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = LinearGradient(0f, 0f, 0f, w, Color.argb(200, Color.red(clubColor), Color.green(clubColor), Color.blue(clubColor)),
+                Color.argb(140, Color.red(clubColor) / 2, Color.green(clubColor) / 2, Color.blue(clubColor) / 2), Shader.TileMode.CLAMP)
+        }
+        canvas.drawPath(shield, p)
+        p.shader = null
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = w * 0.045f
+        p.color = Color.argb(150, 255, 255, 255)
+        canvas.drawPath(shield, p)
         return BitmapDrawable(resources, bmp)
     }
 
-    private fun loadLogo(url: String, iv: ImageView) {
-        val cached = logoCache[url]
+    private val logoPool = java.util.concurrent.Executors.newFixedThreadPool(4)
+
+    // نصغّر الشعار وقت فك الضغط (الصور الكبيرة كانت تملأ الذاكرة وتختفي الشعارات)
+    private fun decodeSmall(bytes: ByteArray): Bitmap? {
+        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
+        if (o.outWidth <= 0) return null
+        val target = dp(96)
+        var sample = 1
+        while (o.outWidth / (sample * 2) >= target) sample *= 2
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+    }
+
+    private fun fetchBitmap(u: String): Bitmap? = try {
+        val conn = URL(u).openConnection() as HttpURLConnection
+        conn.connectTimeout = 7000
+        conn.readTimeout = 7000
+        conn.instanceFollowRedirects = true
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+        if (conn.responseCode in 200..299) conn.inputStream.use { decodeSmall(it.readBytes()) } else null
+    } catch (e: Throwable) { null }
+
+    private fun logoFile(key: String) = java.io.File(java.io.File(filesDir, "logos").apply { mkdirs() },
+        Integer.toHexString(key.hashCode()) + ".png")
+
+    // الشعار: ESPN أولاً، بعدين رابط ESPN برقم النادي، وإذا ما فيه نبحث في TheSportsDB باسم النادي
+    private fun loadLogo(spec: String, iv: ImageView) {
+        val cached = logoCache[spec]
         if (cached != null) {
             iv.setImageBitmap(cached)
             return
         }
-        thread {
-            try {
-                val conn = URL(url).openConnection() as HttpURLConnection
-                conn.connectTimeout = 6000
-                conn.readTimeout = 6000
-                conn.setRequestProperty("User-Agent", "Mozilla/5.0")
-                val bmp = BitmapFactory.decodeStream(conn.inputStream)
-                if (bmp != null) {
-                    logoCache[url] = bmp
-                    ui.post { iv.setImageBitmap(bmp) }
+        logoPool.execute {
+            // من ذاكرة الجهاز أولاً (يبقى محفوظ بعد إعادة التشغيل)
+            val disk = logoFile(spec)
+            if (disk.exists()) {
+                val b = try { BitmapFactory.decodeFile(disk.absolutePath) } catch (e: Throwable) { null }
+                if (b != null) {
+                    logoCache[spec] = b
+                    ui.post { iv.setImageBitmap(b) }
+                    return@execute
                 }
-            } catch (e: Throwable) { }
+            }
+            val parts = spec.split("|").filter { it.isNotEmpty() }
+            val urls = parts.filter { it.startsWith("http") }.toMutableList()
+            val en = parts.firstOrNull { it.startsWith("@") }?.drop(1) ?: ""
+            if (en.isNotEmpty()) prefs.getString("badge_$en", null)?.let { urls.add(0, it) }
+            var bmp: Bitmap? = null
+            for (u in urls.distinct()) { bmp = fetchBitmap(u); if (bmp != null) break }
+            if (bmp == null && en.isNotEmpty()) {
+                val badge = try { Data.badgeFor(en) } catch (e: Throwable) { null }
+                if (badge != null) {
+                    bmp = fetchBitmap("$badge/small") ?: fetchBitmap(badge)
+                    if (bmp != null) prefs.edit().putString("badge_$en", badge).apply()
+                }
+            }
+            val b = bmp ?: return@execute
+            logoCache[spec] = b
+            try { disk.outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) } } catch (e: Throwable) { }
+            ui.post { iv.setImageBitmap(b) }
         }
     }
 
@@ -2609,7 +2799,7 @@ class MainActivity : Activity() {
 
         val item = reorderList.removeAt(idx)
         reorderList.add(targetIdx, item)
-        prefs.edit().putString("fav_apps", reorderList.joinToString(",")).apply()
+        prefs.edit().putString("fav_apps", reorderList.joinToString(",")).commit()
 
         val neighborView = favRow.getChildAt(targetIdx) ?: return
         favRow.removeViewAt(targetIdx)
@@ -2621,7 +2811,7 @@ class MainActivity : Activity() {
         reorderingPkg = null
         reorderHintTv.visibility = View.GONE
         if (reorderList.isNotEmpty()) {
-            prefs.edit().putString("fav_apps", reorderList.joinToString(",")).apply()
+            prefs.edit().putString("fav_apps", reorderList.joinToString(",")).commit()
         }
         loadAppsAndDock(focusPkg = pkg)
         Toast.makeText(this, "تم تثبيت مكان التطبيق ✓", Toast.LENGTH_SHORT).show()
@@ -2844,7 +3034,7 @@ class MainActivity : Activity() {
         val inFav = favs.contains(pkg)
 
         fun save() {
-            prefs.edit().putString("fav_apps", favs.joinToString(",")).apply()
+            prefs.edit().putString("fav_apps", favs.joinToString(",")).commit()
             loadAppsAndDock(focusPkg = pkg)
         }
 

@@ -1,3 +1,4 @@
+// WM Launcher — نسخة الكود رقم 4
 package com.riyadh.home
 
 import org.json.JSONObject
@@ -301,12 +302,35 @@ object Data {
         "al ahli jeddah" to "الأهلي", "al ittihad jeddah" to "الاتحاد", "al taawon" to "التعاون", "monaco" to "موناكو", "club brugge" to "كلوب بروج", "celtic" to "سلتيك"
     )
 
-    // إذا ما فيه شعار في الرد، نجرب رابط ESPN المباشر برقم النادي
+    // مصادر الشعار بالترتيب: شعار ESPN، رابط ESPN برقم النادي، ثم اسم النادي (للبحث في TheSportsDB)
     private fun logo(t: JSONObject): String {
+        val out = ArrayList<String>()
         val l = t.optString("logo", "")
-        if (l.isNotEmpty()) return l
+        if (l.isNotEmpty()) out.add(l)
         val id = t.optString("id", "")
-        return if (id.isNotEmpty()) "https://a.espncdn.com/i/teamlogos/soccer/500/$id.png" else ""
+        if (id.isNotEmpty()) out.add("https://a.espncdn.com/i/teamlogos/soccer/500/$id.png")
+        val en = t.optString("displayName", "").ifEmpty { t.optString("shortDisplayName", "") }.replace("|", " ")
+        if (en.isNotEmpty()) out.add("@$en")
+        return out.joinToString("|")
+    }
+
+    // البحث عن شعار نادي في TheSportsDB (مجاني)
+    fun badgeFor(en: String): String? {
+        val names = linkedSetOf(en, en.replace(Regex("\\b(FC|SC|CF|FK|AFC|Club)\\b"), "").trim(), en.replace("-", " "))
+        for (key in listOf("123", "3")) for (n in names) {
+            if (n.length < 3) continue
+            try {
+                val j = JSONObject(get("https://www.thesportsdb.com/api/v1/json/$key/searchteams.php?t=" + java.net.URLEncoder.encode(n, "UTF-8")))
+                val arr = j.optJSONArray("teams") ?: continue
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    if (o.optString("strSport") != "Soccer") continue
+                    val b = o.optString("strBadge", "").ifEmpty { o.optString("strTeamBadge", "") }
+                    if (b.startsWith("http")) return b
+                }
+            } catch (e: Throwable) { }
+        }
+        return null
     }
 
     private fun ar(t: JSONObject): String {
