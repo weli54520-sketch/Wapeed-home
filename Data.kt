@@ -1,3 +1,4 @@
+// WM Launcher — نسخة الكود رقم 4
 package com.riyadh.home
 
 import org.json.JSONObject
@@ -15,7 +16,7 @@ import java.util.Locale
 data class City(val name: String, val lat: Double, val lon: Double, val cc: String = "SA", val sub: String = "")
 data class PrayerDay(val list: List<Prayer>, val tz: String)
 data class League(val slug: String, val name: String, val def: Boolean)
-data class Weather(val temp: Int, val feels: Int, val humidity: Int, val wind: Int, val status: String)
+data class Weather(val temp: Int, val feels: Int, val humidity: Int, val wind: Int, val status: String, val cat: Int = 0, val isDay: Boolean = true)
 data class Prayer(val name: String, val time: LocalTime)
 data class Match(
     val league: String, val home: String, val homeLogo: String,
@@ -181,26 +182,48 @@ object Data {
 
     private fun get(u: String): String {
         val c = URL(u).openConnection() as HttpURLConnection
-        c.connectTimeout = 8000
-        c.readTimeout = 8000
-        c.setRequestProperty("User-Agent", "Mozilla/5.0")
-        return c.inputStream.bufferedReader().readText()
+        try {
+            c.connectTimeout = 8000
+            c.readTimeout = 8000
+            c.setRequestProperty("User-Agent", "Mozilla/5.0")
+            return c.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            c.disconnect()
+        }
     }
 
+    // cat: 0 صافي، 1 غائم جزئياً، 2 غائم، 3 ضباب، 4 مطر، 5 ثلج، 6 عاصفة (لأيقونة الطقس)
     fun weather(c: City): Weather {
         val u = "https://api.open-meteo.com/v1/forecast?latitude=${c.lat}&longitude=${c.lon}" +
-            "&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code"
+            "&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code,is_day"
         val w = JSONObject(get(u)).getJSONObject("current")
         val code = w.getInt("weather_code")
-        val st = when {
-            code == 0 -> "سماء صافية"; code <= 3 -> "غائم جزئياً"; code <= 48 -> "ضباب"
-            code <= 67 -> "أمطار"; code <= 82 -> "زخات"; else -> "عواصف"
+        val st = when (code) {
+            0 -> "سماء صافية"
+            1, 2 -> "غائم جزئياً"
+            3 -> "غائم"
+            45, 48 -> "ضباب"
+            in 51..57 -> "رذاذ"
+            in 61..67 -> "أمطار"
+            in 71..77, 85, 86 -> "ثلوج"
+            in 80..82 -> "زخات"
+            else -> if (code >= 95) "عواصف رعدية" else "غائم"
         }
+        val cat = when (code) {
+            0 -> 0
+            1, 2 -> 1
+            3 -> 2
+            45, 48 -> 3
+            in 51..67, in 80..82 -> 4
+            in 71..77, 85, 86 -> 5
+            else -> if (code >= 95) 6 else 2
+        }
+        val day = w.optInt("is_day", -1).let { if (it >= 0) it == 1 else LocalTime.now(ZoneId.of("Asia/Riyadh")).hour in 6..17 }
         return Weather(
             Math.round(w.getDouble("temperature_2m")).toInt(),
             Math.round(w.getDouble("apparent_temperature")).toInt(),
             w.getInt("relative_humidity_2m"),
-            Math.round(w.getDouble("wind_speed_10m")).toInt(), st
+            Math.round(w.getDouble("wind_speed_10m")).toInt(), st, cat, day
         )
     }
 
