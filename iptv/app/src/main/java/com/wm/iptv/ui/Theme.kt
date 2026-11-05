@@ -57,7 +57,7 @@ val Plex = FontFamily(
 )
 
 @Composable
-fun AppTheme(content: @Composable () -> Unit) {
+fun AppTheme(scaleToTv: Boolean = true, content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = darkColorScheme(
             primary = C.Text, onPrimary = C.Bg, background = C.Bg, surface = C.Panel,
@@ -73,7 +73,8 @@ fun AppTheme(content: @Composable () -> Unit) {
             val h = minOf(dm.widthPixels, dm.heightPixels).toFloat()
             Density(density = minOf(w / 1280f, h / 720f), fontScale = 1f)
         }
-        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl, LocalDensity provides scaled) {
+        val density = if (scaleToTv) scaled else LocalDensity.current
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl, LocalDensity provides density) {
             ProvideTextStyle(TextStyle(fontFamily = Plex, color = C.Text, fontSize = 16.sp)) {
                 content()
             }
@@ -118,4 +119,14 @@ object Ico {
     val Back = icon("back", "M9,6l6,6l-6,6", stroke = true)
     val List = icon("list", "M8,6h12M8,12h12M8,18h12M4,6h0.01M4,12h0.01M4,18h0.01", stroke = true)
     val Tv = icon("tv", "M3,6h18v12h-18z", "M8,21h8", stroke = true)
+    val Close = icon("close", "M6,6l12,12M18,6l-12,12", stroke = true)
+    val Pip = icon("pip", "M3,5h18v14h-18z", "M12,12h7v5h-7z", stroke = true)
+    val Expand = icon("expand", "M4,9v-5h5M20,9v-5h-5M4,15v5h5M20,15v5h-5", stroke = true)
+    val Home = icon("home", "M3,11l9,-7l9,7v9h-6v-6h-6v6h-6z", stroke = true)
+    val Film = icon("film", "M4,4h16v16h-16z", "M8,4v16M16,4v16M4,9h4M4,15h4M16,9h4M16,15h4", stroke = true)
+    val Stack = icon("stack", "M4,8h16v12h-16z", "M7,5h10M9,2h6", stroke = true)
+    val Sort = icon("sort", "M4,7h16M7,12h10M10,17h4", stroke = true)
+    val Lock = icon("lock", "M6,11h12v9h-12z", "M8,11v-3a4,4 0,0 1,8 0v3", stroke = true)
+    val Plus10 = icon("plus5", "M12,5a7,7 0,1 1,-7 7", "M12,2v6l4,-3z")
+    val Minus10 = icon("minus5", "M12,5a7,7 0,1 0,7 7", "M12,2v6l-4,-3z")
 }

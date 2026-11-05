@@ -44,14 +44,20 @@ jobs:
             echo "WMTV_KEY_ALIAS=wmtv" >> "$GITHUB_ENV"
           fi
           echo "WMTV_KEYSTORE=$RUNNER_TEMP/wmtv.jks" >> "$GITHUB_ENV"
-      - run: gradle assembleRelease --no-daemon --stacktrace
-      - run: cp app/build/outputs/apk/release/app-release.apk ../wmtv.apk
+      - run: gradle assembleTvRelease assembleMobileRelease --no-daemon --stacktrace
+      - run: |
+          cp app/build/outputs/apk/tv/release/app-tv-release.apk ../wmtv.apk
+          cp app/build/outputs/apk/mobile/release/app-mobile-release.apk ../wmtv-mobile.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: wmtv-apk
-          path: wmtv.apk
+          name: wmtv-apks
+          path: |
+            wmtv.apk
+            wmtv-mobile.apk
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: iptv-v${{ github.run_number }}
           name: WM TV 1.${{ github.run_number }}
-          files: wmtv.apk
+          files: |
+            wmtv.apk
+            wmtv-mobile.apk

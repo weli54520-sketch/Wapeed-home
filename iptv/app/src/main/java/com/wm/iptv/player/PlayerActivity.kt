@@ -44,17 +44,20 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 object PlayerLauncher {
+    /** نسخة الجوال تغيّرها لمشغلها الخاص */
+    var target: Class<out android.app.Activity> = PlayerActivity::class.java
+
     fun live(ctx: Context, channelId: Int, listKey: String) {
-        ctx.startActivity(Intent(ctx, PlayerActivity::class.java).putExtra("type", "live").putExtra("id", channelId).putExtra("list", listKey))
+        ctx.startActivity(Intent(ctx, target).putExtra("type", "live").putExtra("id", channelId).putExtra("list", listKey))
     }
 
     fun movie(ctx: Context, m: Movie, startMs: Long) {
-        ctx.startActivity(Intent(ctx, PlayerActivity::class.java).putExtra("type", "movie").putExtra("id", m.id).putExtra("ext", m.ext)
+        ctx.startActivity(Intent(ctx, target).putExtra("type", "movie").putExtra("id", m.id).putExtra("ext", m.ext)
             .putExtra("title", m.name).putExtra("image", m.icon).putExtra("start", startMs))
     }
 
     fun episode(ctx: Context, seriesId: Int, e: Episode, seriesName: String, cover: String, startMs: Long) {
-        ctx.startActivity(Intent(ctx, PlayerActivity::class.java).putExtra("type", "episode").putExtra("id", e.id).putExtra("ext", e.ext)
+        ctx.startActivity(Intent(ctx, target).putExtra("type", "episode").putExtra("id", e.id).putExtra("ext", e.ext)
             .putExtra("sid", seriesId).putExtra("season", e.season).putExtra("num", e.number)
             .putExtra("title", seriesName).putExtra("image", e.image.ifBlank { cover }).putExtra("cover", cover).putExtra("start", startMs))
     }
@@ -62,7 +65,7 @@ object PlayerLauncher {
     /** من "أكمل المشاهدة" */
     fun resume(ctx: Context, p: Progress) {
         val id = p.key.substringAfter(':').toIntOrNull() ?: return
-        val i = Intent(ctx, PlayerActivity::class.java).putExtra("id", id).putExtra("ext", p.ext).putExtra("title", p.title)
+        val i = Intent(ctx, target).putExtra("id", id).putExtra("ext", p.ext).putExtra("title", p.title)
             .putExtra("image", p.image).putExtra("start", if (p.finished) 0L else p.position)
         if (p.key.startsWith("e:")) i.putExtra("type", "episode").putExtra("sid", p.seriesId).putExtra("cover", p.image)
         else i.putExtra("type", "movie")
@@ -108,9 +111,9 @@ class PlayerVm {
 }
 
 @OptIn(UnstableApi::class)
-class PlayerActivity : ComponentActivity() {
-    private lateinit var player: ExoPlayer
-    private val vm = PlayerVm()
+open class PlayerActivity : ComponentActivity() {
+    internal lateinit var player: ExoPlayer
+    internal val vm = PlayerVm()
 
     private var type = "movie"
     private var contentId = 0
@@ -150,11 +153,42 @@ class PlayerActivity : ComponentActivity() {
         player.addListener(listener)
         vm.subtitleSize = Repo.store.subtitleSize
 
-        setContent { AppTheme { PlayerScreen(vm, player, this) } }
+        setContent { Content() }
 
         startCurrent(intent.getLongExtra("start", 0L))
         startTicker()
     }
+
+    /** واجهة المشغل — نسخة الجوال تستبدلها بواجهة لمس */
+    @androidx.compose.runtime.Composable
+    protected open fun Content() { AppTheme { PlayerScreen(vm, player, this) } }
+
+    // ───── أوامر عامة (للواجهات اللمس) ─────
+    fun togglePlayPause() { if (player.isPlaying) player.pause() else player.play(); vm.overlay = true; touch() }
+    fun seekBy(ms: Long) {
+        val d = player.duration.takeIf { it != MC.TIME_UNSET && it > 0 } ?: return
+        player.seekTo((player.currentPosition + ms).coerceIn(0L, (d - 1_000).coerceAtLeast(0L))); touch()
+    }
+    /** معاينة مكان التقديم (مع الصورة) بدون ما نقدم فعلياً */
+    fun previewSeek(targetMs: Long) {
+        val d = player.duration.takeIf { it != MC.TIME_UNSET && it > 0 } ?: return
+        if (vm.seekTarget == null) vm.seekOrigin = player.currentPosition
+        val t = targetMs.coerceIn(0L, (d - 1_000).coerceAtLeast(0L))
+        vm.seekTarget = t; vm.overlay = true; touch()
+        thumbs?.request(t)
+    }
+    fun commitSeekNow() = commitSeek()
+    fun cancelSeekNow() = cancelSeek()
+    fun nextEpisodeNow() = playNextEpisode()
+    fun dismissNextEpisode() { nextDismissed = true; vm.countdown = -1 }
+    fun zapBy(dir: Int) = zap(dir)
+    fun retryNow() { retries = 0; reconnectJob?.cancel(); reconnect("إعادة المحاولة") }
+    fun keepOverlay() = touch()
+    fun toggleFavoriteChannel(): Boolean {
+        val c = vm.channel ?: return false
+        vm.favorite = Repo.toggleFavorite(Kind.LIVE, c.id); return vm.favorite
+    }
+    fun showLiveBanner() = showBanner()
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -375,7 +409,7 @@ class PlayerActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         saveProgress()
-        if (::player.isInitialized) player.pause()
+        if (::player.isInitialized && !isInPictureInPictureMode) player.pause()
     }
 
     override fun onResume() {

@@ -327,7 +327,7 @@ private fun LiveOverlay(vm: PlayerVm) {
 }
 
 @Composable
-private fun ChannelsPanel(vm: PlayerVm, act: PlayerActivity) {
+internal fun ChannelsPanel(vm: PlayerVm, act: PlayerActivity) {
     val list = vm.channels
     val cur = vm.channel
     val state = rememberLazyListState()
@@ -369,7 +369,7 @@ private fun PanelChannel(c: Channel, playing: Boolean, mod: Modifier, onClick: (
 // ───────────────────────── الصوت والترجمة ─────────────────────────
 
 @Composable
-private fun TracksPanel(vm: PlayerVm, act: PlayerActivity) {
+internal fun TracksPanel(vm: PlayerVm, act: PlayerActivity) {
     val fr = remember { FocusRequester() }
     LaunchedEffect(Unit) { delay(40); try { fr.requestFocus() } catch (_: Exception) {} }
     val audio = vm.tracks.groups.filter { it.type == MC.TRACK_TYPE_AUDIO }

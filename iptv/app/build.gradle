@@ -40,6 +40,19 @@ android {
         }
     }
 
+    // نسختين من نفس المشروع: التلفزيون والجوال
+    flavorDimensions 'device'
+    productFlavors {
+        tv {
+            dimension 'device'
+            applicationId 'com.wm.iptv'
+        }
+        mobile {
+            dimension 'device'
+            applicationId 'com.wm.iptv.mobile'
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled true
