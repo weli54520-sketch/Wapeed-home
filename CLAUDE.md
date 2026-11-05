@@ -6,12 +6,12 @@
 - `app/src/main/java/com/riyadh/home/MainActivity.kt`: الواجهة كلها مبنية بالكود (لا يوجد XML). عربي RTL، والتنقل بالريموت (D-pad).
 - `app/src/main/java/com/riyadh/home/Data.kt`: المدن، الطقس (Open-Meteo)، مواقيت الصلاة (Aladhan)، المباريات (ESPN).
 - `.github/workflows/build.yml`: يبني التطبيق في GitHub Actions. **لا تحذفه ولا تعدّله بدون سبب واضح.**
-- ملفات `Data.kt` و`MainActivity.kt` في جذر المستودع ومجلد `github/workflows` (بدون نقطة) نسخ قديمة غير مستخدمة في البناء.
+- `backup_MainActivity_v1.kt.txt`: نسخة المالك القديمة للرجوع إليها (امتداد .txt حتى لا تُترجم).
 
 ## البناء والتحديث
 - البناء من GitHub Actions. إذا فشل، اقرأ سجل الخطأ (أسطر `e:`) وأصلحه.
 - التحديث الداخلي يقرأ آخر Release من `weli54520-sketch/Wapeed-home`، ويأخذ الأرقام من اسم الـ tag (مثل `v43` تصير 43) ويقارنها بـ `versionCode` المثبّت. شرطه أن يكون في الـ Release ملف `.apk` مرفوع.
-- آخر Release معروف: `v42`. تحقق كيف يُحدد `versionCode` (في `app/build.gradle` أو من `build.yml`) قبل أي إصدار جديد.
+- آخر Release معروف: `v47` (الفرع `ui-home-redesign`). تحقق كيف يُحدد `versionCode` (في `app/build.gradle` أو من `build.yml`) قبل أي إصدار جديد.
 - `Weather(cat, isDay)` في `Data.kt` تعتمد عليها أيقونة الطقس. لا تحذفها.
 
 ## قواعد العمل
