@@ -54,6 +54,11 @@ object Repo {
         store = Store(context.applicationContext)
         appDir = context.applicationContext.filesDir
         _account.value = store.currentAccount()
+        applyUserAgent(_account.value)
+    }
+
+    private fun applyUserAgent(a: Account?) {
+        XtreamApi.USER_AGENT = a?.userAgent?.trim()?.takeIf { it.isNotEmpty() } ?: XtreamApi.DEFAULT_UA
     }
 
     fun api(): XtreamApi = XtreamApi(_account.value ?: throw ApiException("لا يوجد حساب"))
@@ -144,12 +149,14 @@ object Repo {
 
     // ───────────── الحسابات ─────────────
     /** يتحقق من البيانات ويضيف الحساب. يرمي ApiException لو فيه مشكلة */
-    suspend fun login(name: String, server: String, user: String, pass: String): Account {
+    suspend fun login(name: String, server: String, user: String, pass: String, userAgent: String = ""): Account {
         val srv = XtreamApi.normalizeServer(server)
         if (srv.isEmpty() || user.isBlank() || pass.isBlank()) throw ApiException("عبّ كل الحقول")
         val existing = store.accounts().firstOrNull { it.server.equals(srv, true) && it.username == user.trim() }
-        val acc = Account(existing?.id ?: System.currentTimeMillis().toString(), name.trim().ifEmpty { "اشتراكي" }, srv, user.trim(), pass.trim())
-        val info = withContext(Dispatchers.IO) { XtreamApi(acc).authenticate() }
+        val acc = Account(existing?.id ?: System.currentTimeMillis().toString(), name.trim().ifEmpty { "اشتراكي" }, srv, user.trim(), pass.trim(), userAgent.trim())
+        val previousUa = XtreamApi.USER_AGENT
+        applyUserAgent(acc)
+        val info = try { withContext(Dispatchers.IO) { XtreamApi(acc).authenticate() } } catch (e: Exception) { XtreamApi.USER_AGENT = previousUa; throw e }
         store.saveAccount(acc)
         switchAccount(acc.id)
         store.saveUserInfo(info)
@@ -159,6 +166,7 @@ object Repo {
     fun switchAccount(id: String) {
         store.currentAccountId = id
         _account.value = store.currentAccount()
+        applyUserAgent(_account.value)
         _catalog.value = Catalog()
         epgCache.clear(); vodCache.clear(); seriesCache.clear()
         _state.value = LoadState.Idle
@@ -170,6 +178,7 @@ object Repo {
         store.accounts().firstOrNull { it.id == id }?.let { a -> dir(a).deleteRecursively() }
         store.deleteAccount(id)
         _account.value = store.currentAccount()
+        applyUserAgent(_account.value)
         _catalog.value = Catalog()
         bump()
         start()

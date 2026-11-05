@@ -8,7 +8,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -62,6 +65,7 @@ fun LoginScreen(onDone: () -> Unit, onCancel: (() -> Unit)? = null) {
     var server by rememberSaveable { mutableStateOf("") }
     var user by rememberSaveable { mutableStateOf("") }
     var pass by rememberSaveable { mutableStateOf("") }
+    var ua by rememberSaveable { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -74,7 +78,7 @@ fun LoginScreen(onDone: () -> Unit, onCancel: (() -> Unit)? = null) {
         busy = true; error = null
         scope.launch {
             try {
-                Repo.login(name, server, user, pass)
+                Repo.login(name, server, user, pass, ua)
                 onDone()
             } catch (e: Exception) {
                 error = e.message ?: "تعذر الدخول"
@@ -82,8 +86,10 @@ fun LoginScreen(onDone: () -> Unit, onCancel: (() -> Unit)? = null) {
         }
     }
 
-    Box(Modifier.fillMaxSize().background(C.Bg), contentAlignment = Alignment.Center) {
-        Column(Modifier.width(620.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Box(Modifier.fillMaxSize().background(C.Bg), contentAlignment = Alignment.TopCenter) {
+        // الصفحة تنزل مع التركيز لو ما كفت الشاشة
+        Column(Modifier.width(620.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(vertical = 36.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.Bottom) {
                 Text("WM", fontSize = 40.sp, fontWeight = FontWeight.Bold)
                 Text(" TV", fontSize = 40.sp, color = C.Text3)
@@ -94,6 +100,7 @@ fun LoginScreen(onDone: () -> Unit, onCancel: (() -> Unit)? = null) {
             Input("رابط السيرفر", server, { server = it }, hint = "مثال: http://example.com:8080", ltr = true, type = KeyboardType.Uri)
             Input("اسم المستخدم", user, { user = it }, ltr = true)
             Input("كلمة المرور", pass, { pass = it }, ltr = true, password = true)
+            Input("User-Agent (اختياري)", ua, { ua = it }, hint = "اتركه فاضي إلا إذا طلبه المزود", ltr = true)
             error?.let { Text(it, color = Color(0xFFFF6961), fontSize = 15.sp) }
             Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Pill(if (busy) "جارٍ التحقق…" else "دخول", big = true, onClick = { submit() })

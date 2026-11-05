@@ -25,7 +25,12 @@ class ApiException(message: String) : IOException(message)
 class XtreamApi(private val account: Account) {
 
     companion object {
-        const val USER_AGENT = "WMTV/1.0 (Linux; Android)"
+        /** هوية الاتصال الافتراضية لأندرويد (نفس اللي ترسلها أغلب التطبيقات) */
+        val DEFAULT_UA: String = System.getProperty("http.agent")?.takeIf { it.isNotBlank() } ?: "Dalvik/2.1.0 (Linux; U; Android)"
+
+        /** هوية الاتصال الحالية — المستخدم يقدر يغيرها لو المزود يطلب وحدة معينة */
+        @Volatile
+        var USER_AGENT: String = DEFAULT_UA
 
         /** يرتب رابط السيرفر مهما كتبه المستخدم */
         fun normalizeServer(input: String): String {
@@ -78,7 +83,7 @@ class XtreamApi(private val account: Account) {
             }
             if (code == 401 || code == 403) {
                 c.disconnect()
-                throw ApiException("السيرفر رفض الدخول ($code) — تأكد من اسم المستخدم وكلمة المرور أو أن الاشتراك فعال")
+                throw ApiException("السيرفر رفض الدخول ($code). تأكد إن البيانات نفسها تشتغل في تطبيق ثاني وإن الاشتراك فعال. لو المزود يطلب User-Agent معين، اكتبه في الخانة الاختيارية تحت.")
             }
             if (code !in 200..299) {
                 c.disconnect()

@@ -9,7 +9,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -59,7 +64,16 @@ fun AppTheme(content: @Composable () -> Unit) {
             onSurface = C.Text, onBackground = C.Text, secondary = C.Accent,
         )
     ) {
-        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+        // التصميم مبني على شاشة 1280×720؛ نكبّر أو نصغّر كل شي بنفس النسبة
+        // عشان يطلع نفس الشكل على أي تلفزيون أو بروجكتر مهما كانت كثافة الشاشة.
+        val cfg = LocalConfiguration.current
+        val dm = LocalContext.current.resources.displayMetrics
+        val scaled = remember(cfg.screenWidthDp, cfg.screenHeightDp, dm.widthPixels, dm.heightPixels) {
+            val w = maxOf(dm.widthPixels, dm.heightPixels).toFloat()
+            val h = minOf(dm.widthPixels, dm.heightPixels).toFloat()
+            Density(density = minOf(w / 1280f, h / 720f), fontScale = 1f)
+        }
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl, LocalDensity provides scaled) {
             ProvideTextStyle(TextStyle(fontFamily = Plex, color = C.Text, fontSize = 16.sp)) {
                 content()
             }

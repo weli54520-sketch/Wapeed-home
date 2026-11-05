@@ -7,6 +7,7 @@ data class Account(
     val server: String,   // مثل http://host:port بدون / في الآخر
     val username: String,
     val password: String,
+    val userAgent: String = "",  // اختياري: لو المزود يطلب هوية اتصال معينة
 )
 
 data class Category(val id: String, val name: String)

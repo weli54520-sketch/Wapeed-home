@@ -14,21 +14,21 @@ class Store(context: Context) {
         val arr = try { JSONArray(prefs.getString("accounts", "[]")) } catch (_: Exception) { JSONArray() }
         return (0 until arr.length()).mapNotNull { i ->
             val o = arr.optJSONObject(i) ?: return@mapNotNull null
-            Account(o.optString("id"), o.optString("name"), o.optString("server"), o.optString("user"), o.optString("pass"))
+            Account(o.optString("id"), o.optString("name"), o.optString("server"), o.optString("user"), o.optString("pass"), o.optString("ua"))
         }
     }
 
     fun saveAccount(a: Account) {
         val list = accounts().filter { it.id != a.id } + a
         val arr = JSONArray()
-        list.forEach { arr.put(JSONObject().put("id", it.id).put("name", it.name).put("server", it.server).put("user", it.username).put("pass", it.password)) }
+        list.forEach { arr.put(JSONObject().put("id", it.id).put("name", it.name).put("server", it.server).put("user", it.username).put("pass", it.password).put("ua", it.userAgent)) }
         prefs.edit().putString("accounts", arr.toString()).apply()
     }
 
     fun deleteAccount(id: String) {
         val list = accounts().filter { it.id != id }
         val arr = JSONArray()
-        list.forEach { arr.put(JSONObject().put("id", it.id).put("name", it.name).put("server", it.server).put("user", it.username).put("pass", it.password)) }
+        list.forEach { arr.put(JSONObject().put("id", it.id).put("name", it.name).put("server", it.server).put("user", it.username).put("pass", it.password).put("ua", it.userAgent)) }
         val e = prefs.edit().putString("accounts", arr.toString())
         if (currentAccountId == id) e.putString("current", list.firstOrNull()?.id ?: "")
         e.apply()
