@@ -1,6 +1,9 @@
 name: Build
 on:
   push:
+    paths-ignore:
+      - 'iptv/**'
+      - '.github/workflows/iptv.yml'
   workflow_dispatch:
 permissions:
   contents: write

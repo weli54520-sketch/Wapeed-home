@@ -1,0 +1,57 @@
+name: WM TV (IPTV) Build
+on:
+  push:
+    paths:
+      - 'iptv/**'
+      - '.github/workflows/iptv.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: iptv
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.10.2
+      # مفتاح التوقيع: من Secrets لو موجود، وإلا مفتاح مؤقت (التحديث يحتاج حذف القديم)
+      - name: Prepare signing key
+        env:
+          KS_B64: ${{ secrets.WMTV_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.WMTV_KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.WMTV_KEY_ALIAS }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/wmtv.jks"
+            echo "WMTV_KEYSTORE_PASSWORD=$KS_PASS" >> "$GITHUB_ENV"
+            echo "WMTV_KEY_PASSWORD=$KS_PASS" >> "$GITHUB_ENV"
+            echo "WMTV_KEY_ALIAS=$KS_ALIAS" >> "$GITHUB_ENV"
+          else
+            echo "::warning::WMTV_KEYSTORE_BASE64 secret not set - signing with a temporary key"
+            PASS=$(openssl rand -hex 16)
+            keytool -genkeypair -keystore "$RUNNER_TEMP/wmtv.jks" -storepass "$PASS" -keypass "$PASS" -alias wmtv \
+              -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=WM TV, O=WM, C=SA"
+            echo "WMTV_KEYSTORE_PASSWORD=$PASS" >> "$GITHUB_ENV"
+            echo "WMTV_KEY_PASSWORD=$PASS" >> "$GITHUB_ENV"
+            echo "WMTV_KEY_ALIAS=wmtv" >> "$GITHUB_ENV"
+          fi
+          echo "WMTV_KEYSTORE=$RUNNER_TEMP/wmtv.jks" >> "$GITHUB_ENV"
+      - run: gradle assembleRelease --no-daemon --stacktrace
+      - run: cp app/build/outputs/apk/release/app-release.apk ../wmtv.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wmtv-apk
+          path: wmtv.apk
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: iptv-v${{ github.run_number }}
+          name: WM TV 1.${{ github.run_number }}
+          files: wmtv.apk
