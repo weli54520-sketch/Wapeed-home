@@ -130,6 +130,13 @@ fun SettingsScreen(nav: Navigator) {
                         onClick = { st.subtitleSize = (st.subtitleSize + 1) % 4; changed() })
                 }
 
+                item { Header("القوائم") }
+                item(key = "ropen") {
+                    @Suppress("UNUSED_VARIABLE") val t = tick
+                    SideItem("تحديث القوائم عند فتح التطبيق", Modifier.track(mem, "ropen"), trailing = if (st.refreshOnOpen) "تشغيل" else "إيقاف",
+                        onClick = { st.refreshOnOpen = !st.refreshOnOpen; changed() })
+                }
+
                 item { Header("المباشر") }
                 item(key = "prev") {
                     @Suppress("UNUSED_VARIABLE") val t = tick

@@ -86,7 +86,7 @@ fun MHomeScreen(nav: Navigator) {
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp + LocalBarSpace.current)) {
         item {
-            MHeader("WM TV") { MIconButton(Ico.Gear, "الإعدادات") { nav.go(Route.Settings) } }
+            MHeader("WM TV") { MRefreshButton(); MIconButton(Ico.Gear, "الإعدادات") { nav.go(Route.Settings) } }
         }
         if (expiry != null) item {
             Text(expiry, color = C.Star, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 18.dp))
@@ -187,7 +187,7 @@ fun MLiveScreen(nav: Navigator) {
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            MHeader("المباشر") { MIconButton(if (searching) Ico.Close else Ico.Search, "بحث") { searching = !searching; if (!searching) query = "" } }
+            MHeader("المباشر") { MRefreshButton(); MIconButton(if (searching) Ico.Close else Ico.Search, "بحث") { searching = !searching; if (!searching) query = "" } }
             if (searching) {
                 MField(query, { query = it }, "ابحث عن قناة", Modifier.padding(horizontal = 18.dp, vertical = 4.dp), autoFocus = true, leading = Ico.Search)
             } else {

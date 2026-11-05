@@ -94,6 +94,18 @@ object Ico {
         return b.build()
     }
 
+    private fun arrowIcon(name: String, arc: String, head: String): ImageVector =
+        ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f)
+            .addPath(addPathNodes(arc), stroke = SolidColor(Color.White), strokeLineWidth = 1.9f,
+                strokeLineCap = androidx.compose.ui.graphics.StrokeCap.Round)
+            .addPath(addPathNodes(head), fill = SolidColor(Color.White))
+            .build()
+
+    /** سهم دائري للرجوع (الرقم يتكتب في النص) */
+    val SkipBack = arrowIcon("skipback", "M12,5.2A7.8,7.8 0,1 1,4.9 9.6", "M12,2.2L8.2,5.2L12,8.2Z")
+    /** سهم دائري للتقديم */
+    val SkipFwd = arrowIcon("skipfwd", "M12,5.2A7.8,7.8 0,1 0,19.1 9.6", "M12,2.2L15.8,5.2L12,8.2Z")
+
     val Play = icon("play", "M7,4v16l13,-8z")
     val Pause = icon("pause", "M6,4h4v16h-4z", "M14,4h4v16h-4z")
     val Search = icon("search", "M11,4a7,7 0,1 0,0.01 0z", "M20,20l-3.5,-3.5", stroke = true)

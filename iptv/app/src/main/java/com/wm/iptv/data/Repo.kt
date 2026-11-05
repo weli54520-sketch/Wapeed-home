@@ -42,6 +42,10 @@ object Repo {
     val version: StateFlow<Int> = _version
     fun bump() { _version.value = _version.value + 1 }
 
+    /** خطأ آخر تحديث (لو فشل والقوائم القديمة موجودة) */
+    private val _refreshError = MutableStateFlow<String?>(null)
+    val refreshError: StateFlow<String?> = _refreshError
+
     private val refreshLock = Mutex()
     private var refreshJob: Job? = null
 
@@ -75,7 +79,7 @@ object Repo {
                 if (_account.value?.id == a.id) _catalog.value = c
             }
             val old = System.currentTimeMillis() - store.lastRefresh > 12 * 3600 * 1000L
-            if (_catalog.value.isEmpty || old) refresh()
+            if (_catalog.value.isEmpty || old || store.refreshOnOpen) refresh()
             else refreshUserInfoQuietly()
         }
     }
@@ -108,6 +112,7 @@ object Repo {
         refreshJob = scope.launch {
             refreshLock.withLock {
                 val first = _catalog.value.isEmpty
+                _refreshError.value = null
                 try {
                     withContext(Dispatchers.IO) {
                         val api = XtreamApi(a)
@@ -135,6 +140,7 @@ object Repo {
                     bump()
                 } catch (e: Exception) {
                     _state.value = if (first) LoadState.Error(e.message ?: "خطأ غير معروف") else LoadState.Idle
+                    if (!first) _refreshError.value = e.message ?: "تعذر التحديث"
                 }
             }
         }

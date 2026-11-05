@@ -199,6 +199,9 @@ fun MSettingsScreen(nav: Navigator) {
         item { MRow(if (state is LoadState.Loading) (state as LoadState.Loading).step else "تحديث القوائم الآن", icon = Ico.Refresh) { Repo.refresh() } }
         item { MRow("الحسابات", "${st.accounts().size}", Ico.User) { nav.go(Route.Accounts) } }
 
+        item { MGroup("القوائم") }
+        item { tick.let { }; MRow("تحديث القوائم عند فتح التطبيق", if (st.refreshOnOpen) "تشغيل" else "إيقاف") { st.refreshOnOpen = !st.refreshOnOpen; tick++ } }
+
         item { MGroup("المشغل") }
         item { tick.let { }; MRow("صورة اللقطة أثناء التقديم", when (st.seekPreviewMode) { 1 -> "دايماً"; 2 -> "إيقاف"; else -> "تلقائي" }) { st.seekPreviewMode = (st.seekPreviewMode + 1) % 3; tick++ } }
         item { tick.let { }; MRow("الحلقة التالية تلقائياً", if (st.autoNextEpisode) "تشغيل" else "إيقاف") { st.autoNextEpisode = !st.autoNextEpisode; tick++ } }

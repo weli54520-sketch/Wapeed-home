@@ -116,6 +116,7 @@ fun MBrowseScreen(nav: Navigator, kind: Kind) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             MHeader(if (isMovie) "الأفلام" else "المسلسلات") {
+                MRefreshButton()
                 if (selection != "recent" && selection != "fav")
                     MIconButton(Ico.Sort, "الترتيب") {
                         sort = (sort + 1) % 3

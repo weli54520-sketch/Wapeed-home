@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -356,3 +357,51 @@ fun remainingText(p: com.wm.iptv.data.Progress): String {
 private val clockFmt = java.time.format.DateTimeFormatter.ofPattern("h:mm a", java.util.Locale("ar"))
 fun clockText(ms: Long): String =
     java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault()).format(clockFmt)
+
+/** سهم دائري واضح والرقم داخله (مثل الآيفون) */
+@Composable
+fun SeekGlyph(forward: Boolean, label: String, size: Dp, tint: Color = Color.White) {
+    val fs = with(androidx.compose.ui.platform.LocalDensity.current) { (size * if (label.length > 1) 0.24f else 0.3f).toSp() }
+    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
+        Icon(if (forward) Ico.SkipFwd else Ico.SkipBack, null, tint = tint, modifier = Modifier.matchParentSize())
+        Text(label, color = tint, fontSize = fs, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = size * 0.1f))
+    }
+}
+
+/** أيقونة تحديث تلف وقت التحديث */
+@Composable
+fun SpinningRefresh(spinning: Boolean, tint: Color, size: Dp) {
+    val rot = if (spinning) {
+        val t = androidx.compose.animation.core.rememberInfiniteTransition(label = "spin")
+        t.animateFloat(0f, 360f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(900, easing = androidx.compose.animation.core.LinearEasing)), label = "r").value
+    } else 0f
+    Icon(Ico.Refresh, "تحديث القوائم", tint = tint, modifier = Modifier.size(size).graphicsLayer { rotationZ = rot })
+}
+
+/** زر تحديث القوائم (يطلع رسالة لما يخلص) */
+@Composable
+fun rememberRefreshAction(): Pair<Boolean, () -> Unit> {
+    val st by com.wm.iptv.data.Repo.state.collectAsState()
+    val err by com.wm.iptv.data.Repo.refreshError.collectAsState()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val loading = st is com.wm.iptv.data.LoadState.Loading
+    var asked by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(loading, err) {
+        if (asked && !loading) {
+            asked = false
+            android.widget.Toast.makeText(ctx, if (err != null) "ما تم التحديث: $err" else "تم تحديث القوائم", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+    return loading to { if (!loading) { asked = true; com.wm.iptv.data.Repo.refresh() } }
+}
+
+@Composable
+fun TvRefreshButton(modifier: Modifier = Modifier) {
+    val (loading, refresh) = rememberRefreshAction()
+    var focused by remember { mutableStateOf(false) }
+    FocusBox(modifier, onClick = refresh, shape = CircleShape, focusScale = 1.08f, onFocus = { focused = it }) {
+        Box(Modifier.size(42.dp).background(if (focused) C.Text else C.Glass), contentAlignment = Alignment.Center) {
+            SpinningRefresh(loading, if (focused) C.Bg else C.Text, 20.dp)
+        }
+    }
+}

@@ -188,7 +188,11 @@ fun TopBar(nav: Navigator, current: Route, modifier: Modifier = Modifier) {
             NavPill("", current == Route.Settings, Ico.Gear) { nav.go(Route.Settings) }
         }
         Spacer(Modifier.weight(1f))
-        Text(clockText(now), fontSize = 18.sp, fontWeight = FontWeight.Medium, color = C.Text2, modifier = Modifier.width(90.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            com.wm.iptv.ui.TvRefreshButton()
+            Spacer(Modifier.width(14.dp))
+            Text(clockText(now), fontSize = 18.sp, fontWeight = FontWeight.Medium, color = C.Text2, modifier = Modifier.width(90.dp))
+        }
     }
 }
 

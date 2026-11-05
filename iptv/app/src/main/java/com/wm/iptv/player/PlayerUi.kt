@@ -192,10 +192,11 @@ private fun VodOverlay(vm: PlayerVm) {
                     Modifier.align(Alignment.Center).background(Color(0x8C000000), RoundedCornerShape(999.dp)).padding(horizontal = 22.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    if (delta < 0) Icon(Ico.Rewind, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    val step = if (vm.barMode) "5د" else "5"
+                    if (delta < 0) com.wm.iptv.ui.SeekGlyph(false, step, 40.dp)
                     Text(txt, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                     if (vm.speedLabel.isNotEmpty()) Text(vm.speedLabel, fontSize = 15.sp, color = C.Accent, fontWeight = FontWeight.Bold)
-                    if (delta >= 0) Icon(Ico.Forward, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    if (delta >= 0) com.wm.iptv.ui.SeekGlyph(true, step, 40.dp)
                 }
             }
         } else if (!vm.playing && !vm.buffering && vm.message == null) {

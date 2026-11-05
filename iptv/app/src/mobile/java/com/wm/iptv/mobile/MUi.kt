@@ -318,3 +318,12 @@ fun MUpdateDialog() {
         }
     }
 }
+
+/** زر تحديث القوائم في أعلى الشاشة */
+@Composable
+fun MRefreshButton() {
+    val (loading, refresh) = com.wm.iptv.ui.rememberRefreshAction()
+    Box(Modifier.size(42.dp).clip(CircleShape).tap(onClick = refresh), contentAlignment = Alignment.Center) {
+        com.wm.iptv.ui.SpinningRefresh(loading, C.Text, 21.dp)
+    }
+}

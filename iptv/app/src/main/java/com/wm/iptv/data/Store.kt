@@ -180,6 +180,11 @@ class Store(context: Context) {
         get() = prefs.getString("pref_sub", "ar") ?: "ar"
         set(v) { prefs.edit().putString("pref_sub", v).apply() }
 
+    /** تحديث القوائم كل ما ينفتح التطبيق */
+    var refreshOnOpen: Boolean
+        get() = prefs.getBoolean("refresh_on_open", true)
+        set(v) { prefs.edit().putBoolean("refresh_on_open", v).apply() }
+
     var autoNextEpisode: Boolean
         get() = prefs.getBoolean("auto_next", true)
         set(v) { prefs.edit().putBoolean("auto_next", v).apply() }

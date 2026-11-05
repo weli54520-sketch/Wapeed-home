@@ -220,9 +220,9 @@ fun MobilePlayerScreen(vm: PlayerVm, player: ExoPlayer, act: MobilePlayerActivit
                             Round(if (vm.playing) Ico.Pause else Ico.Play, "تشغيل", 68) { act.togglePlayPause() }
                             Round(Ico.Forward, "القناة التالية", 50) { act.zapBy(1) }
                         } else {
-                            Round(Ico.Minus10, "رجوع ٥ ثواني", 50, label = "5") { act.seekBy(-5_000) }
+                            SeekRound(false) { act.seekBy(-5_000) }
                             Round(if (vm.playing) Ico.Pause else Ico.Play, "تشغيل", 68) { act.togglePlayPause() }
-                            Round(Ico.Plus10, "تقديم ٥ ثواني", 50, label = "5") { act.seekBy(5_000) }
+                            SeekRound(true) { act.seekBy(5_000) }
                         }
                     }
                 }
@@ -318,6 +318,14 @@ private fun Round(icon: ImageVector, desc: String, size: Int, label: String = ""
     Box(Modifier.size(size.dp).clip(CircleShape).background(Color(0x59000000)).tap(onClick = onClick), contentAlignment = Alignment.Center) {
         Icon(icon, desc, tint = Color.White, modifier = Modifier.size((size * 0.5f).dp))
         if (label.isNotEmpty()) Text(label, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 3.dp))
+    }
+}
+
+/** زر تقديم/رجوع: سهم دائري والرقم ٥ داخله */
+@Composable
+private fun SeekRound(forward: Boolean, onClick: () -> Unit) {
+    Box(Modifier.size(56.dp).clip(CircleShape).background(Color(0x59000000)).tap(onClick = onClick), contentAlignment = Alignment.Center) {
+        com.wm.iptv.ui.SeekGlyph(forward, "5", 38.dp)
     }
 }
 
