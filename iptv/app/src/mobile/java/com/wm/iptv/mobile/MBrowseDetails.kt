@@ -144,7 +144,7 @@ fun MBrowseScreen(nav: Navigator, kind: Kind) {
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(108.dp), state = grid,
-                    contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 24.dp),
+                    contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 24.dp + LocalBarSpace.current),
                     horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     item(span = { GridItemSpan(maxLineSpan) }) {

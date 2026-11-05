@@ -108,6 +108,8 @@ class PlayerVm {
     // مسلسلات
     var nextEp by mutableStateOf<Episode?>(null)
     var countdown by mutableIntStateOf(-1)
+    // نزلت على شريط التقدم: يمين ويسار = ٥ دقايق
+    var barMode by mutableStateOf(false)
 }
 
 @OptIn(UnstableApi::class)
@@ -365,7 +367,7 @@ open class PlayerActivity : ComponentActivity() {
                     checkNextEpisode()
                 }
                 val now = SystemClock.uptimeMillis()
-                if (vm.overlay && vm.playing && vm.seekTarget == null && vm.panel == null && now - lastInteraction > 4500) vm.overlay = false
+                if (vm.overlay && vm.playing && vm.seekTarget == null && vm.panel == null && now - lastInteraction > (if (vm.barMode) 7000 else 4500)) { vm.overlay = false; vm.barMode = false }
                 if (vm.banner && vm.panel == null && vm.zapPreview == null && now - lastInteraction > 5000) vm.banner = false
                 // البث علّق في التحميل فترة طويلة
                 if (vm.isLive && bufferingSince > 0 && now - bufferingSince > 15_000) { bufferingSince = 0L; reconnect("البث علّق") }
@@ -458,6 +460,7 @@ open class PlayerActivity : ComponentActivity() {
             if (!up) return true
             when {
                 vm.seekTarget != null -> cancelSeek()
+                vm.barMode -> { vm.barMode = false; touch() }
                 vm.countdown >= 0 -> { nextDismissed = true; vm.countdown = -1 }
                 vm.digits.isNotEmpty() -> { digitsJob?.cancel(); vm.digits = "" }
                 vm.zapPreview != null -> { zapJob?.cancel(); vm.zapPreview = null }
@@ -490,8 +493,18 @@ open class PlayerActivity : ComponentActivity() {
             KeyEvent.KEYCODE_MEDIA_PLAY -> { if (up) { player.play(); touch() }; return true }
             KeyEvent.KEYCODE_MEDIA_PAUSE -> { if (up) { player.pause(); vm.overlay = true; touch() }; return true }
             KeyEvent.KEYCODE_MEDIA_NEXT -> { if (up) playNextEpisode(); return true }
-            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_CAPTIONS -> { if (up) { vm.panel = Panel.TRACKS; vm.overlay = true; touch() }; return true }
-            KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_INFO -> { if (up) { vm.overlay = !vm.overlay || !vm.playing; touch() }; return true }
+            KeyEvent.KEYCODE_DPAD_UP -> {
+                // من الشريط: يرجع للتقديم بالثواني. غير كذا: الصوت والترجمة
+                if (up) { if (vm.barMode) { commitIfPending(); vm.barMode = false } else { vm.panel = Panel.TRACKS; vm.overlay = true }; touch() }
+                return true
+            }
+            KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_CAPTIONS -> { if (up) { vm.panel = Panel.TRACKS; vm.overlay = true; touch() }; return true }
+            KeyEvent.KEYCODE_DPAD_DOWN -> {
+                // ينزل على شريط التقدم
+                if (up) { if (!vm.barMode) { commitIfPending(); vm.barMode = true }; vm.overlay = true; touch() }
+                return true
+            }
+            KeyEvent.KEYCODE_INFO -> { if (up) { vm.overlay = !vm.overlay || !vm.playing; touch() }; return true }
         }
         return super.dispatchKeyEvent(ev)
     }
@@ -539,7 +552,14 @@ open class PlayerActivity : ComponentActivity() {
         val now = SystemClock.uptimeMillis()
         if (vm.seekTarget == null) { vm.seekOrigin = player.currentPosition; vm.seekTarget = vm.seekOrigin }
         var t = vm.seekTarget ?: 0L
-        if (ev.repeatCount == 0) {
+        if (vm.barMode) {
+            // على الشريط: كل ضغطة ٥ دقايق، ومع الاستمرار ٥ دقايق كل ثلث ثانية
+            if (ev.repeatCount == 0 || now - seekLastRepeat >= 330) {
+                t += dir * 300_000L
+                seekLastRepeat = now
+            }
+            vm.speedLabel = ""
+        } else if (ev.repeatCount == 0) {
             t += dir * 5_000L
             seekHoldStart = now; seekLastRepeat = now
             vm.speedLabel = ""
@@ -558,6 +578,8 @@ open class PlayerActivity : ComponentActivity() {
         touch()
         thumbs?.request(t)
     }
+
+    private fun commitIfPending() { if (vm.seekTarget != null) commitSeek() }
 
     private fun scheduleCommit(ms: Long) {
         if (vm.seekTarget == null) return

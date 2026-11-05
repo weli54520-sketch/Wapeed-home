@@ -163,10 +163,16 @@ private fun VodOverlay(vm: PlayerVm) {
                         Spacer(Modifier.height(14.dp))
                         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(26.dp, Alignment.CenterHorizontally)) {
-                                Hint("◀ ▶", "ضغطة = ٥ ثواني")
-                                Hint("ضغط مستمر", "تسريع ×٢ ×٤ ×٨")
-                                Hint("OK", if (vm.seekTarget != null) "تأكيد" else "تشغيل / إيقاف")
-                                Hint("▲", "الصوت والترجمة")
+                                if (vm.barMode) {
+                                    Hint("◀ ▶", "٥ دقايق")
+                                    Hint("OK", if (vm.seekTarget != null) "تأكيد" else "تشغيل / إيقاف")
+                                    Hint("▲", "رجوع للتقديم بالثواني")
+                                } else {
+                                    Hint("◀ ▶", "ضغطة = ٥ ثواني")
+                                    Hint("ضغط مستمر", "تسريع ×٢ ×٤ ×٨")
+                                    Hint("▼", "شريط التقدم (٥ دقايق)")
+                                    Hint("▲", "الصوت والترجمة")
+                                }
                             }
                         }
                     }
@@ -240,13 +246,19 @@ private fun SeekBar(vm: PlayerVm) {
                 Text(formatTime(target), fontSize = 18.sp, fontWeight = FontWeight.Bold)
             }
         }
+        val bar = vm.barMode
         Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(24.dp)) {
-            Box(Modifier.align(Alignment.Center).fillMaxWidth().height(6.dp).clip(CircleShape).background(Color(0x38FFFFFF))) {
+            // لما يكون الشريط محدد: أعرض ومحاط بإطار
+            Box(Modifier.align(Alignment.Center).fillMaxWidth().height(if (bar) 10.dp else 6.dp).clip(CircleShape).background(Color(0x38FFFFFF))
+                .then(if (bar) Modifier.border(1.5.dp, Color(0x99FFFFFF), CircleShape) else Modifier)) {
                 Box(Modifier.fillMaxHeight().fillMaxWidth(frac(vm.buffered)).background(Color(0x5CFFFFFF)))
                 Box(Modifier.fillMaxHeight().fillMaxWidth(frac(pos)).clip(CircleShape).background(Color.White))
             }
             if (target != null) {
                 Box(Modifier.align(Alignment.CenterStart).offset(x = w * frac(target) - 9.dp).size(18.dp).background(C.Accent, CircleShape)
+                    .border(3.dp, Color(0x59000000), CircleShape))
+            } else if (bar) {
+                Box(Modifier.align(Alignment.CenterStart).offset(x = w * frac(pos) - 10.dp).size(20.dp).background(Color.White, CircleShape)
                     .border(3.dp, Color(0x59000000), CircleShape))
             }
         }

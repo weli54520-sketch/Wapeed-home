@@ -84,7 +84,7 @@ fun MHomeScreen(nav: Navigator) {
         }
     }
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp + LocalBarSpace.current)) {
         item {
             MHeader("WM TV") { MIconButton(Ico.Gear, "الإعدادات") { nav.go(Route.Settings) } }
         }
@@ -209,7 +209,7 @@ fun MLiveScreen(nav: Navigator) {
                     else -> "ما فيه قنوات هنا"
                 })
             } else {
-                LazyColumn(state = list, contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 20.dp)) {
+                LazyColumn(state = list, contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 20.dp + LocalBarSpace.current)) {
                     items(channels, key = { it.id }) { ch ->
                         MChannelRow(ch, ch.id in favs,
                             onClick = { PlayerLauncher.live(ctx, ch.id, if (query.isNotBlank()) LiveKeys.ALL else catKey) },

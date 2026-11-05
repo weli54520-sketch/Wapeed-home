@@ -101,7 +101,7 @@ fun MSearchScreen(nav: Navigator) {
         }
     }
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp + LocalBarSpace.current)) {
         item { MHeader("بحث") }
         item {
             Row(Modifier.padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -180,7 +180,7 @@ fun MSettingsScreen(nav: Navigator) {
     var tick by remember { mutableIntStateOf(0) }
     val info = remember(version) { st.userInfo() }
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 30.dp)) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 30.dp + LocalBarSpace.current)) {
         item { MHeader("الإعدادات") }
         item {
             Column(Modifier.padding(horizontal = 18.dp).fillMaxWidth().background(C.Panel, RoundedCornerShape(16.dp)).padding(18.dp),

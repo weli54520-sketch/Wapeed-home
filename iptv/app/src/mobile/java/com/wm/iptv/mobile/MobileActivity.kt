@@ -11,7 +11,19 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -123,8 +135,9 @@ private fun MMain(nav: Navigator) {
     val holder = rememberSaveableStateHolder()
     val route = nav.top
     val state by Repo.state.collectAsState()
-    Column(Modifier.fillMaxSize()) {
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+    val showBar = route.isTab
+    Box(Modifier.fillMaxSize()) {
+        CompositionLocalProvider(LocalBarSpace provides if (showBar) 96.dp else 0.dp) {
             AnimatedContent(
                 targetState = route,
                 transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(140)) },
@@ -149,39 +162,67 @@ private fun MMain(nav: Navigator) {
                     }
                 }
             }
-            if (state is LoadState.Loading) {
-                Text((state as LoadState.Loading).step, fontSize = 11.sp, color = C.Text3,
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(10.dp)
-                        .background(Color(0xE61C1C1E), RoundedCornerShape(999.dp)).padding(horizontal = 12.dp, vertical = 5.dp))
+        }
+        if (state is LoadState.Loading) {
+            Text((state as LoadState.Loading).step, fontSize = 11.sp, color = C.Text3,
+                modifier = Modifier.align(Alignment.TopCenter).padding(8.dp)
+                    .background(Color(0xE61C1C1E), RoundedCornerShape(999.dp)).padding(horizontal = 12.dp, vertical = 5.dp))
+        }
+        // الشريط العائم
+        androidx.compose.animation.AnimatedVisibility(
+            showBar, modifier = Modifier.align(Alignment.BottomCenter),
+            enter = androidx.compose.animation.slideInVertically { it } + fadeIn(),
+            exit = androidx.compose.animation.slideOutVertically { it } + fadeOut(),
+        ) { FloatingBar(nav, route) }
+    }
+}
+
+private data class TabDef(val route: Route, val label: String, val icon: ImageVector)
+
+private val tabs = listOf(
+    TabDef(Route.Home, "الرئيسية", Ico.Home),
+    TabDef(Route.Live, "المباشر", Ico.Tv),
+    TabDef(Route.Movies, "الأفلام", Ico.Film),
+    TabDef(Route.SeriesList, "المسلسلات", Ico.Stack),
+    TabDef(Route.Search, "بحث", Ico.Search),
+)
+
+/** شريط عائم بستايل زجاجي: كبسولة فوق المحتوى، والتحديد فقاعة تتحرك بنعومة */
+@Composable
+private fun FloatingBar(nav: Navigator, current: Route) {
+    val index = tabs.indexOfFirst { it.route == current || (current == Route.Settings && it.route == Route.Home) }.coerceAtLeast(0)
+    val shape = RoundedCornerShape(999.dp)
+    Box(Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp).fillMaxWidth()) {
+        BoxWithConstraints(
+            Modifier.fillMaxWidth().height(66.dp)
+                .shadow(28.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
+                .clip(shape)
+                .background(Brush.verticalGradient(listOf(Color(0xE62C2C30), Color(0xF01A1A1D))))
+                .border(0.8.dp, Brush.verticalGradient(listOf(Color(0x59FFFFFF), Color(0x0DFFFFFF))), shape)
+                .padding(5.dp)
+        ) {
+            val itemW = maxWidth / tabs.size
+            val x by animateDpAsState(itemW * index, spring(dampingRatio = 0.78f, stiffness = 420f), label = "tab")
+            // فقاعة التحديد
+            Box(
+                Modifier.offset(x = x).width(itemW).fillMaxHeight().clip(shape)
+                    .background(Brush.verticalGradient(listOf(Color(0x40FFFFFF), Color(0x1FFFFFFF))))
+                    .border(0.6.dp, Color(0x33FFFFFF), shape)
+            )
+            Row(Modifier.fillMaxSize()) {
+                tabs.forEachIndexed { i, t ->
+                    val sel = i == index
+                    val color by animateColorAsState(if (sel) Color.White else Color(0xFF9A9AA0), label = "c")
+                    Column(
+                        Modifier.weight(1f).fillMaxHeight().clip(shape).plainClick { nav.go(t.route) },
+                        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(t.icon, t.label, tint = color, modifier = Modifier.size(21.dp))
+                        Spacer(Modifier.height(3.dp))
+                        Text(t.label, fontSize = 10.sp, color = color, fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium, maxLines = 1)
+                    }
+                }
             }
         }
-        if (route.isTab || route == Route.Settings) BottomBar(nav, route)
-    }
-}
-
-@Composable
-private fun BottomBar(nav: Navigator, current: Route) {
-    Row(
-        Modifier.fillMaxWidth().background(Color(0xFF0F0F12)).padding(top = 6.dp, bottom = 4.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly
-    ) {
-        Tab("الرئيسية", Ico.Home, current == Route.Home || current == Route.Settings) { nav.go(Route.Home) }
-        Tab("المباشر", Ico.Tv, current == Route.Live) { nav.go(Route.Live) }
-        Tab("الأفلام", Ico.Film, current == Route.Movies) { nav.go(Route.Movies) }
-        Tab("المسلسلات", Ico.Stack, current == Route.SeriesList) { nav.go(Route.SeriesList) }
-        Tab("بحث", Ico.Search, current == Route.Search) { nav.go(Route.Search) }
-    }
-}
-
-@Composable
-private fun Tab(label: String, icon: ImageVector, selected: Boolean, onClick: () -> Unit) {
-    val color = if (selected) C.Text else C.Dim
-    Column(
-        Modifier.plainClick(onClick).padding(horizontal = 10.dp, vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Icon(icon, label, tint = color, modifier = Modifier.size(23.dp))
-        Spacer(Modifier.height(3.dp))
-        Text(label, fontSize = 11.sp, color = color, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
     }
 }

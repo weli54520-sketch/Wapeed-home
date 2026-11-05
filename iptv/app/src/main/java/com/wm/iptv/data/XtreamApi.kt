@@ -44,7 +44,10 @@ class XtreamApi(private val account: Account) {
             }
             val q = s.indexOf('?')
             if (q > 0) s = s.substring(0, q)
-            return s.trimEnd('/')
+            s = s.trimEnd('/')
+            // المنفذ 80 يشتغل http فقط — لو انكتب https معه نصلحه
+            if (s.startsWith("https://", true) && s.endsWith(":80")) s = "http://" + s.substring(8)
+            return s
         }
 
         private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
@@ -127,6 +130,8 @@ class XtreamApi(private val account: Account) {
             throw ApiException("ما قدرت أوصل للسيرفر — تأكد من الرابط")
         } catch (e: java.net.SocketTimeoutException) {
             throw ApiException("السيرفر ما رد في الوقت — حاول مرة ثانية")
+        } catch (e: javax.net.ssl.SSLException) {
+            throw ApiException("الرابط مكتوب https لكن السيرفر يشتغل http — جرّب تكتبه http://")
         } catch (e: IOException) {
             throw ApiException("مشكلة في الاتصال: ${e.message ?: "غير معروفة"}")
         }

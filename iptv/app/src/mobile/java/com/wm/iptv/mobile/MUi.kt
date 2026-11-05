@@ -264,3 +264,6 @@ fun MInfoChip(text: String) {
 @Composable
 fun Modifier.plainClick(onClick: () -> Unit): Modifier =
     this.combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+
+/** المساحة اللي ياخذها الشريط العائم تحت (القوائم تضيفها كـ padding) */
+val LocalBarSpace = androidx.compose.runtime.staticCompositionLocalOf { 0.dp }
