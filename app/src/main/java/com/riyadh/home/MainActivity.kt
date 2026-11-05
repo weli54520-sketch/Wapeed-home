@@ -137,8 +137,8 @@ class WmAmbient(c: Context, initial: Int) : View(c) {
             builtBase = base
         }
         if (g1 == null || w != builtW || h != builtH) {
-            g1 = RadialGradient(0f, 0f, w * 0.6f, intArrayOf(Color.argb(90, 255, 255, 255), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
-            g2 = RadialGradient(0f, 0f, w * 0.5f, intArrayOf(Color.argb(70, 255, 255, 255), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
+            g1 = RadialGradient(0f, 0f, w * 0.6f, intArrayOf(Color.argb(40, 255, 255, 255), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
+            g2 = RadialGradient(0f, 0f, w * 0.5f, intArrayOf(Color.argb(30, 255, 255, 255), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
             p1.shader = g1
             p2.shader = g2
             tintFilter = null
@@ -1225,7 +1225,11 @@ class MainActivity : Activity() {
         }
         navPillGlyph.setKind(kind)
         navPillLabel.text = name
-        if (::clockCluster.isInitialized) clockCluster.visibility = if (currentPage == 1) View.VISIBLE else View.GONE
+        if (navPill.isFocused) {
+            navPillLabel.layoutParams = navPillLabel.layoutParams.also { it.width = ViewGroup.LayoutParams.WRAP_CONTENT }
+            navPillLabel.alpha = 1f
+        }
+        if (::clockCluster.isInitialized) clockCluster.visibility = View.GONE
     }
 
     private fun pillBg(focused: Boolean): Drawable =
@@ -1234,9 +1238,9 @@ class MainActivity : Activity() {
 
     // كبسولة الزاوية: سهم رجوع خارجها، وقرص رمادي داكن بأيقونة بيضاء مصمتة، واسم الصفحة بخط عريض
     private fun buildNavPill(): View {
-        navPillChev = GlyphView(this, 11).apply { setTint(Color.WHITE) }
+        navPillChev = GlyphView(this, 11).apply { setTint(Color.WHITE); scaleX = -1f }
         navPillGlyph = GlyphView(this, 12).apply { setTint(Color.WHITE) }
-        navPillLabel = tv(15f, true, Color.WHITE).apply { includeFontPadding = false }
+        navPillLabel = tv(15f, true, Color.WHITE).apply { includeFontPadding = false; maxLines = 1; alpha = 0f; setPadding(dp(10), 0, dp(12), 0) }
         navPillDisc = FrameLayout(this).apply {
             background = solidCard(Color.rgb(58, 58, 62), 15)
             addView(navPillGlyph, FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER))
@@ -1245,14 +1249,15 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = pillBg(false)
-            setPadding(dp(4), 0, dp(16), 0)
+            setPadding(dp(4), 0, dp(4), 0)
             isFocusable = true
             isClickable = true
             addView(navPillDisc, LinearLayout.LayoutParams(dp(30), dp(30)))
-            addView(navPillLabel, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(10) })
+            addView(navPillLabel, LinearLayout.LayoutParams(0, -2))
             setOnClickListener { openNavMenu() }
             setOnFocusChangeListener { v, f ->
                 v.background = pillBg(f)
+                setExpanded(navPillLabel, f)
                 v.animate().scaleX(if (f) 1.05f else 1f).scaleY(if (f) 1.05f else 1f).setDuration(130).start()
             }
         }
@@ -1260,7 +1265,7 @@ class MainActivity : Activity() {
         return LinearLayout(this).unclip().apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(navPillChev, LinearLayout.LayoutParams(dp(12), dp(20)).apply { marginEnd = dp(6) })
+            addView(navPillChev, LinearLayout.LayoutParams(dp(16), dp(26)).apply { marginEnd = dp(8) })
             addView(navPill, LinearLayout.LayoutParams(-2, dp(38)))
         }
     }
@@ -1268,7 +1273,7 @@ class MainActivity : Activity() {
     // صف القائمة: قرص أيقونة + اسم. المحدد كبسولة فاتحة بنص داكن
     private fun navRow(kind: Int, label: String, current: Boolean, onClick: () -> Unit): View {
         val g = GlyphView(this, kind)
-        val t = tv(15f, true, Color.WHITE).apply {
+        val t = tv(14.5f, true, Color.WHITE).apply {
             text = label
             maxLines = 1
             includeFontPadding = false
@@ -1291,7 +1296,7 @@ class MainActivity : Activity() {
             setPadding(dp(8), 0, dp(14), 0)
             isFocusable = true
             isClickable = true
-            addView(disc, LinearLayout.LayoutParams(dp(32), dp(32)))
+            addView(disc, LinearLayout.LayoutParams(dp(30), dp(30)))
             addView(t, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(12) })
             paint(false, this)
             setOnClickListener { onClick() }
@@ -1324,7 +1329,7 @@ class MainActivity : Activity() {
         fun add(kind: Int, label: String, current: Boolean, act: () -> Unit) {
             val r = navRow(kind, label, current) { closeNavMenu(act) }
             rows.add(r)
-            list.addView(r, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(2) })
+            list.addView(r, LinearLayout.LayoutParams(-1, dp(40)).apply { bottomMargin = dp(2) })
         }
         add(12, "الرئيسية", currentPage == 0) { showPage(0) }
         add(13, "المباريات", currentPage == 1) { showPage(1) }
@@ -1343,7 +1348,6 @@ class MainActivity : Activity() {
         add(18, "الصورة والشاشة", false) { go(Intent(Settings.ACTION_DISPLAY_SETTINGS)) }
         add(19, "الصوت", false) { go(Intent(Settings.ACTION_SOUND_SETTINGS)) }
         add(21, "التطبيقات الأخيرة", false) { showRecentApps() }
-        add(20, "التحديث وحول الواجهة", false) { openSection(6) }
 
         list.measure(View.MeasureSpec.makeMeasureSpec(panelW, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
         val panelH = minOf(list.measuredHeight, frame.height - pillT - dp(20)).coerceAtLeast(pillH)
@@ -1662,18 +1666,11 @@ class MainActivity : Activity() {
             setPadding(dp(4), dp(4), dp(4), dp(8))
         }
 
-        val unifiedBoard = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = slateGlass(215, 28, Color.argb(45, 255, 255, 255), 1)
-            setPadding(dp(22), dp(14), dp(22), dp(14))
-            roundOutline(28)
-        }
-
         // 1. الطقس
         val weatherCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(4), 0, dp(12), 0)
+            background = solidCard(Color.argb(15, 255, 255, 255), 22, Color.argb(23, 255, 255, 255), 1)
+            setPadding(dp(18), dp(14), dp(18), dp(14))
         }
         weatherCol.addView(tv(10.5f, true, Color.argb(150, 255, 255, 255)).apply { text = "محدث تلقائياً" })
         cityHeaderTv = tv(15f, true, Color.WHITE).apply {
@@ -1708,7 +1705,8 @@ class MainActivity : Activity() {
         // 2. مواقيت الصلاة
         val prayerCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(4), 0, dp(12), 0)
+            background = solidCard(Color.argb(15, 255, 255, 255), 22, Color.argb(23, 255, 255, 255), 1)
+            setPadding(dp(18), dp(14), dp(18), dp(14))
         }
         prayerCol.addView(tv(10.5f, true, Color.argb(150, 255, 255, 255)).apply { text = "التوقيت المحلي" })
         prayerCol.addView(tv(15f, true, Color.WHITE).apply {
@@ -1716,7 +1714,7 @@ class MainActivity : Activity() {
             setPadding(0, dp(2), 0, dp(6))
         })
         prayerLayout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        prayerCol.addView(prayerLayout, LinearLayout.LayoutParams(-1, dp(95)))
+        prayerCol.addView(prayerLayout, LinearLayout.LayoutParams(-1, dp(88)))
         prayerTimerTv = tv(11f, true, gold).apply {
             text = "جاري تحديث المواقيت..."
             setPadding(0, dp(4), 0, 0)
@@ -1725,7 +1723,7 @@ class MainActivity : Activity() {
         prayerCol.addView(prayerTimerTv)
 
         // 3. مباريات اليوم (مقصوصة داخل حدودها)
-        val matchesCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val matchesCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = solidCard(Color.argb(15, 255, 255, 255), 22, Color.argb(23, 255, 255, 255), 1); setPadding(dp(18), dp(10), dp(18), dp(4)) }
         val mHead = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1748,7 +1746,7 @@ class MainActivity : Activity() {
         homeMatchRow = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10), dp(14), dp(10), dp(14))
+            setPadding(dp(6), dp(10), dp(6), dp(10))
         }
         val matchScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
@@ -1762,19 +1760,15 @@ class MainActivity : Activity() {
         val showW = pBool("show_weather", true)
         val showP = pBool("show_prayers", true)
         val showM = pBool("show_matches", true)
-        var added = 0
-        fun sep() {
-            if (added > 0) unifiedBoard.addView(vDivider(), LinearLayout.LayoutParams(dp(1), dp(130)).apply { setMargins(dp(8), 0, dp(12), 0) })
+        val midRow = LinearLayout(this).unclip().apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
-        if (showW) { sep(); unifiedBoard.addView(weatherCol, LinearLayout.LayoutParams(dp(195), -2)); added++ }
-        if (showP) { sep(); unifiedBoard.addView(prayerCol, LinearLayout.LayoutParams(dp(220), -2)); added++ }
-        if (showM) { sep(); unifiedBoard.addView(matchesCol, LinearLayout.LayoutParams(0, -2, 1f)); added++ }
-        else if (added > 0) unifiedBoard.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
-        if (added == 0) unifiedBoard.visibility = View.GONE
-
-        // البطل يأخذ المساحة المرنة فوق اللوحة، واللوحة والمفضلة تثبت بأسفل الشاشة
-        col.addView(buildHero(), LinearLayout.LayoutParams(-1, 0, 1f))
-        col.addView(unifiedBoard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
+        midRow.addView(buildHero(), LinearLayout.LayoutParams(0, -1, 1f))
+        if (showW) midRow.addView(weatherCol, LinearLayout.LayoutParams(dp(230), -2).apply { marginStart = dp(14) })
+        if (showP) midRow.addView(prayerCol, LinearLayout.LayoutParams(dp(250), -2).apply { marginStart = dp(14) })
+        col.addView(midRow, LinearLayout.LayoutParams(-1, 0, 1f).apply { bottomMargin = dp(10) })
+        if (showM) col.addView(matchesCol, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
 
         // المفضلة (Dock) في أسفل الشاشة
         val dock = LinearLayout(this).apply {
