@@ -1,6 +1,8 @@
 // WM Launcher — نسخة الكود رقم 4
 package com.riyadh.home
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.animation.ArgbEvaluator
 import android.animation.LayoutTransition
 import android.animation.ValueAnimator
@@ -33,6 +35,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.Window
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.inputmethod.EditorInfo
@@ -635,6 +638,12 @@ class MainActivity : Activity() {
     private lateinit var navPillGlyph: GlyphView
     private lateinit var navPillLabel: TextView
     private lateinit var navPillChev: GlyphView
+    private lateinit var navPillDisc: FrameLayout
+    private var navMenuOpen = false
+    private var navMenuPanel: FrameLayout? = null
+    private var navMenuScrim: View? = null
+    private var navMenuAnim: ValueAnimator? = null
+    private var navMenuBg: GradientDrawable? = null
     private lateinit var clockCluster: View
     private lateinit var settingsNavGlyphs: List<GlyphView>
     private lateinit var settingsIconGlyph: GlyphView
@@ -666,6 +675,9 @@ class MainActivity : Activity() {
     private lateinit var homeMatchRow: LinearLayout
     private lateinit var tickerTv: TextView
     private lateinit var greetingTv: TextView
+    private lateinit var heroGreetTv: TextView
+    private lateinit var heroClockTv: TextView
+    private lateinit var heroDateTv: TextView
     private lateinit var clockTv: TextView
     private lateinit var dateLineTv: TextView
     private lateinit var tempTv: TextView
@@ -699,6 +711,11 @@ class MainActivity : Activity() {
     private val clockTask = Runnable { updateClock() }
     private val rebuildTask = Runnable { doRebuild() }
     private var navTarget = 0
+    private var suppressNav = false
+    private val clearSuppress = Runnable { suppressNav = false }
+    private var updTitleTv: TextView? = null
+    private var updBar: WmBar? = null
+    private var updProgress = -1
     private val navTask = Runnable {
         val i = navTarget
         if (::settingsNav.isInitialized && settingsNav.getOrNull(i)?.hasFocus() == true &&
@@ -905,6 +922,10 @@ class MainActivity : Activity() {
 
     /* ─────────── الريموت ─────────── */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (navMenuOpen && (event.keyCode == KeyEvent.KEYCODE_BACK || event.keyCode == KeyEvent.KEYCODE_MENU)) {
+            if (event.action == KeyEvent.ACTION_UP) closeNavMenu()
+            return true
+        }
         if (pBool("block_keys", true)) {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_TV,
@@ -1043,6 +1064,10 @@ class MainActivity : Activity() {
     }
 
     @Deprecated("") override fun onBackPressed() {
+        if (navMenuOpen) {
+            closeNavMenu()
+            return
+        }
         if (reorderingPkg != null) {
             finishReorderMode()
             return
@@ -1117,6 +1142,10 @@ class MainActivity : Activity() {
         homeRoot = root
         drawerOpen = false
         openPicker = null
+        navMenuAnim?.cancel()
+        navMenuOpen = false
+        navMenuPanel = null
+        navMenuScrim = null
         drawerView = buildDrawer()
         frame.addView(drawerView, FrameLayout.LayoutParams(-1, -1))
         val h = host ?: FrameLayout(this).also { host = it; setContentView(it) }
@@ -1126,13 +1155,13 @@ class MainActivity : Activity() {
 
     private fun scheduleRebuild() {
         ui.removeCallbacks(rebuildTask)
-        ui.postDelayed(rebuildTask, 450)
+        ui.postDelayed(rebuildTask, 260)
     }
 
     private fun doRebuild() {
         val page = currentPage
-        val sec = currentSection
         val row = lastFocusedRow
+        val sy = if (::settingsScroll.isInitialized) settingsScroll.scrollY else 0
         // الواجهة القديمة تبقى تحت والجديدة تظهر فوقها تدريجياً ثم نشيل القديمة (بدون وميض)
         val old: FrameLayout? = if (::rootFrame.isInitialized) rootFrame else null
         old?.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
@@ -1150,8 +1179,11 @@ class MainActivity : Activity() {
         renderMatches()
         loadAppsAndDock()
         if (page == 2) {
-            showSection(sec)
+            suppressNav = true
+            ui.removeCallbacks(clearSuppress)
+            settingsScroll.post { settingsScroll.scrollTo(0, sy) }
             settingsContent.post { settingsContent.getChildAt(row.coerceIn(0, maxOf(0, settingsContent.childCount - 1)))?.requestFocus() }
+            ui.postDelayed(clearSuppress, 300)
         }
     }
 
@@ -1187,126 +1219,257 @@ class MainActivity : Activity() {
     private fun updateNavPill() {
         if (!::navPill.isInitialized) return
         val (kind, name) = when (currentPage) {
-            0 -> 3 to "الرئيسية"
-            1 -> 4 to "المباريات"
-            else -> 1 to "الإعدادات"
+            0 -> 12 to "الرئيسية"
+            1 -> 13 to "المباريات"
+            else -> 14 to "الإعدادات"
         }
         navPillGlyph.setKind(kind)
         navPillLabel.text = name
-        if (::clockCluster.isInitialized) clockCluster.visibility = if (currentPage == 2) View.GONE else View.VISIBLE
+        if (::clockCluster.isInitialized) clockCluster.visibility = if (currentPage == 1) View.VISIBLE else View.GONE
     }
 
-    // كبسولة الزاوية: سهم رجوع + أيقونة الصفحة الحالية + اسمها، وتفتح قائمة التنقل
+    private fun pillBg(focused: Boolean): Drawable =
+        if (focused) solidCard(Color.argb(248, 8, 9, 11), 19, Color.WHITE, 2)
+        else solidCard(Color.argb(236, 8, 9, 11), 19, Color.argb(34, 255, 255, 255), 1)
+
+    // كبسولة الزاوية: سهم رجوع خارجها، وقرص رمادي داكن بأيقونة بيضاء مصمتة، واسم الصفحة بخط عريض
     private fun buildNavPill(): View {
-        val ink = 0xFF0B0E16.toInt()
-        navPillChev = GlyphView(this, 11).apply { setTint(Color.argb(190, 255, 255, 255)) }
-        navPillGlyph = GlyphView(this, 3).apply { setTint(ink) }
-        navPillLabel = tv(15f, true, Color.WHITE)
-        val disc = FrameLayout(this).apply {
-            background = solidCard(Color.WHITE, 17)
-            addView(navPillGlyph, FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
+        navPillChev = GlyphView(this, 11).apply { setTint(Color.WHITE) }
+        navPillGlyph = GlyphView(this, 12).apply { setTint(Color.WHITE) }
+        navPillLabel = tv(15f, true, Color.WHITE).apply { includeFontPadding = false }
+        navPillDisc = FrameLayout(this).apply {
+            background = solidCard(Color.rgb(58, 58, 62), 15)
+            addView(navPillGlyph, FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER))
         }
         navPill = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = solidCard(Color.argb(150, 0, 0, 0), 26, Color.argb(36, 255, 255, 255), 1)
-            setPadding(dp(18), dp(5), dp(12), dp(5))
+            background = pillBg(false)
+            setPadding(dp(4), 0, dp(16), 0)
             isFocusable = true
             isClickable = true
-            addView(navPillChev, LinearLayout.LayoutParams(dp(14), dp(18)))
-            addView(disc, LinearLayout.LayoutParams(dp(34), dp(34)).apply { marginStart = dp(6) })
+            addView(navPillDisc, LinearLayout.LayoutParams(dp(30), dp(30)))
             addView(navPillLabel, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(10) })
-            setOnClickListener { openNavMenu(this) }
+            setOnClickListener { openNavMenu() }
             setOnFocusChangeListener { v, f ->
-                v.background = if (f) solidCard(Color.argb(210, 0, 0, 0), 26, Color.WHITE, 2)
-                else solidCard(Color.argb(150, 0, 0, 0), 26, Color.argb(36, 255, 255, 255), 1)
-                v.translationZ = if (f) dp(8).toFloat() else 0f
-                v.animate().scaleX(if (f) 1.06f else 1f).scaleY(if (f) 1.06f else 1f).setDuration(130).start()
+                v.background = pillBg(f)
+                v.animate().scaleX(if (f) 1.05f else 1f).scaleY(if (f) 1.05f else 1f).setDuration(130).start()
             }
         }
         updateNavPill()
-        return navPill
+        return LinearLayout(this).unclip().apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(navPillChev, LinearLayout.LayoutParams(dp(12), dp(20)).apply { marginEnd = dp(6) })
+            addView(navPill, LinearLayout.LayoutParams(-2, dp(38)))
+        }
     }
 
+    // صف القائمة: قرص أيقونة + اسم. المحدد كبسولة فاتحة بنص داكن
     private fun navRow(kind: Int, label: String, current: Boolean, onClick: () -> Unit): View {
-        val g = GlyphView(this, kind).apply { setTint(Color.WHITE) }
-        val t = tv(15f, true, Color.WHITE).apply { text = label }
+        val g = GlyphView(this, kind)
+        val t = tv(15f, true, Color.WHITE).apply {
+            text = label
+            maxLines = 1
+            includeFontPadding = false
+        }
+        val disc = FrameLayout(this).apply { addView(g, FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER)) }
         fun paint(f: Boolean, row: View) {
             row.background = when {
-                f -> solidCard(Color.WHITE, 14)
-                current -> solidCard(Color.argb(38, 255, 255, 255), 14)
+                f -> solidCard(Color.rgb(236, 236, 238), 16)
+                current -> solidCard(Color.argb(26, 255, 255, 255), 16)
                 else -> null
             }
-            val c = if (f) 0xFF0B0E16.toInt() else if (current) Color.WHITE else Color.argb(215, 255, 255, 255)
+            disc.background = solidCard(if (f) Color.rgb(205, 205, 210) else Color.rgb(36, 36, 40), 16)
+            val c = if (f) Color.rgb(11, 11, 13) else if (current) Color.WHITE else Color.argb(205, 255, 255, 255)
             t.setTextColor(c)
             g.setTint(c)
         }
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(14), 0, dp(14), 0)
+            setPadding(dp(8), 0, dp(14), 0)
             isFocusable = true
             isClickable = true
-            if (kind >= 0) addView(g, LinearLayout.LayoutParams(dp(20), dp(20)))
-            addView(t, LinearLayout.LayoutParams(-2, -2).apply { marginStart = if (kind >= 0) dp(12) else dp(32) })
+            addView(disc, LinearLayout.LayoutParams(dp(32), dp(32)))
+            addView(t, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(12) })
             paint(false, this)
             setOnClickListener { onClick() }
             setOnFocusChangeListener { v, f -> paint(f, v) }
         }
     }
 
-    // قائمة التنقل: تنزل تحت الكبسولة. فوق التنقل الأساسي، وتحت إعدادات النظام
-    private fun openNavMenu(anchor: View) {
+    // الكبسولة تتمدد لقائمة (مثل الفيديو): تنفتح من مكانها وتكبر للأسفل، والصفوف تظهر بتتابع
+    private fun openNavMenu() {
+        if (navMenuOpen || !::rootFrame.isInitialized || !::navPill.isInitialized) return
+        val frame = rootFrame
+        navMenuOpen = true
         try { menuPopup?.dismiss() } catch (e: Throwable) { }
-        val popW = dp(250)
-        val box = LinearLayout(this).apply {
+        val pl = IntArray(2)
+        navPill.getLocationOnScreen(pl)
+        val fl = IntArray(2)
+        frame.getLocationOnScreen(fl)
+        val pillW = navPill.width
+        val pillH = navPill.height
+        val pillR = pl[0] - fl[0] + pillW
+        val pillT = pl[1] - fl[1]
+        val panelW = dp(264)
+
+        val list = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
             setPadding(dp(8), dp(8), dp(8), dp(8))
         }
-        var pw: PopupWindow? = null
         val rows = mutableListOf<View>()
         fun add(kind: Int, label: String, current: Boolean, act: () -> Unit) {
-            val r = navRow(kind, label, current) { pw?.dismiss(); act() }
+            val r = navRow(kind, label, current) { closeNavMenu(act) }
             rows.add(r)
-            box.addView(r, LinearLayout.LayoutParams(-1, dp(44)).apply { bottomMargin = dp(2) })
+            list.addView(r, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(2) })
         }
-        add(3, "الرئيسية", currentPage == 0) { showPage(0) }
-        add(4, "المباريات", currentPage == 1) { showPage(1) }
-        add(5, "جميع التطبيقات", false) { showPage(0, false); openDrawer() }
-        add(0, "الواي فاي", false) { go(Intent(Settings.ACTION_WIFI_SETTINGS)) }
-        add(2, "المدينة · " + city().name, false) { openCityPicker() }
-        add(1, "الإعدادات", currentPage == 2) { showPage(2) }
-        box.addView(View(this).apply { setBackgroundColor(Color.argb(28, 255, 255, 255)) },
-            LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(6); bottomMargin = dp(6) })
-        add(-1, "إعدادات النظام", false) { go(Intent(Settings.ACTION_SETTINGS)) }
-        add(-1, "الصورة والشاشة", false) { go(Intent(Settings.ACTION_DISPLAY_SETTINGS)) }
-        add(-1, "الصوت", false) { go(Intent(Settings.ACTION_SOUND_SETTINGS)) }
-        add(-1, "التطبيقات الأخيرة", false) { showRecentApps() }
-        add(-1, "التحديث وحول الواجهة", false) { openSection(6) }
+        add(12, "الرئيسية", currentPage == 0) { showPage(0) }
+        add(13, "المباريات", currentPage == 1) { showPage(1) }
+        add(15, "جميع التطبيقات", false) { showPage(0, false); openDrawer() }
+        add(17, "الواي فاي", false) { go(Intent(Settings.ACTION_WIFI_SETTINGS)) }
+        add(16, "المدينة · " + city().name, false) { openCityPicker() }
+        add(14, "الإعدادات", currentPage == 2) { showPage(2) }
+        list.addView(View(this).apply { setBackgroundColor(Color.argb(26, 255, 255, 255)) },
+            LinearLayout.LayoutParams(-1, dp(1)).apply {
+                topMargin = dp(6)
+                bottomMargin = dp(6)
+                marginStart = dp(12)
+                marginEnd = dp(12)
+            })
+        add(14, "إعدادات النظام", false) { go(Intent(Settings.ACTION_SETTINGS)) }
+        add(18, "الصورة والشاشة", false) { go(Intent(Settings.ACTION_DISPLAY_SETTINGS)) }
+        add(19, "الصوت", false) { go(Intent(Settings.ACTION_SOUND_SETTINGS)) }
+        add(21, "التطبيقات الأخيرة", false) { showRecentApps() }
+        add(20, "التحديث وحول الواجهة", false) { openSection(6) }
 
-        val loc = IntArray(2)
-        anchor.getLocationOnScreen(loc)
-        val sw = resources.displayMetrics.widthPixels
-        val y = loc[1] + anchor.height + dp(8)
-        val maxH = resources.displayMetrics.heightPixels - y - dp(16)
-        box.measure(View.MeasureSpec.makeMeasureSpec(popW, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
-        val frame = FrameLayout(this).apply {
-            background = solidCard(Color.argb(245, 22, 25, 34), 22, Color.argb(30, 255, 255, 255), 1)
-            addView(ScrollView(this@MainActivity).apply {
-                isVerticalScrollBarEnabled = false
-                addView(box)
-            }, FrameLayout.LayoutParams(-1, -1))
+        list.measure(View.MeasureSpec.makeMeasureSpec(panelW, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        val panelH = minOf(list.measuredHeight, frame.height - pillT - dp(20)).coerceAtLeast(pillH)
+
+        val bg = GradientDrawable().apply {
+            setColor(Color.argb(247, 6, 7, 9))
+            cornerRadius = dp(19).toFloat()
+            setStroke(dp(1), Color.argb(34, 255, 255, 255))
         }
-        val popup = PopupWindow(frame, popW, minOf(box.measuredHeight + dp(2), maxH), true)
-        popup.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-        popup.isOutsideTouchable = true
-        pw = popup
-        menuPopup = popup
-        val x = (loc[0] + anchor.width - popW).coerceIn(dp(12), maxOf(dp(12), sw - popW - dp(12)))
-        popup.showAtLocation(anchor, Gravity.TOP or Gravity.LEFT, x, y)
+        navMenuBg = bg
+        val sv = ScrollView(this).apply {
+            isVerticalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            addView(list)
+        }
+        val panel = FrameLayout(this).apply {
+            background = bg
+            outlineProvider = ViewOutlineProvider.BACKGROUND
+            clipToOutline = true
+            elevation = dp(16).toFloat()
+            addView(sv, FrameLayout.LayoutParams(panelW, -1, Gravity.TOP or Gravity.RIGHT))
+        }
+        val scrim = View(this).apply {
+            isFocusable = false
+            isClickable = true
+            setOnClickListener { closeNavMenu() }
+        }
+        navMenuScrim = scrim
+        navMenuPanel = panel
+
+        // نقفل التركيز على الصفحة تحت القائمة حتى لا يهرب المؤشر منها
+        homeRoot.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+        drawerView.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+        frame.addView(scrim, FrameLayout.LayoutParams(-1, -1))
+        val lp = FrameLayout.LayoutParams(pillW, pillH, Gravity.TOP or Gravity.LEFT).apply {
+            topMargin = pillT
+            leftMargin = pillR - pillW
+        }
+        frame.addView(panel, lp)
+        navPill.visibility = View.INVISIBLE
+
+        rows.forEach {
+            it.alpha = 0f
+            it.translationY = dp(6).toFloat()
+        }
+        navMenuAnim?.cancel()
+        navMenuAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 300
+            interpolator = DecelerateInterpolator(2f)
+            addUpdateListener {
+                val p = it.animatedValue as Float
+                val w = pillW + ((panelW - pillW) * p).toInt()
+                lp.width = w
+                lp.height = pillH + ((panelH - pillH) * p).toInt()
+                lp.leftMargin = pillR - w
+                panel.layoutParams = lp
+                bg.cornerRadius = dp(19) + dp(9) * p
+            }
+            start()
+        }
+        rows.forEachIndexed { i, r ->
+            r.animate().alpha(1f).translationY(0f).setStartDelay(110L + i * 22L).setDuration(200)
+                .setInterpolator(DecelerateInterpolator(1.6f)).start()
+        }
         val first = rows.getOrNull(if (currentPage == 2) 5 else currentPage)
-        frame.post { first?.requestFocus() }
+        panel.post { first?.requestFocus() }
+    }
+
+    // يقفل القائمة برجوع الكبسولة لحجمها، وبعدها ينفذ الإجراء المختار
+    private fun closeNavMenu(then: (() -> Unit)? = null) {
+        val panel = navMenuPanel
+        if (!navMenuOpen || panel == null) {
+            then?.invoke()
+            return
+        }
+        navMenuOpen = false
+        navMenuAnim?.cancel()
+        val lp = panel.layoutParams as FrameLayout.LayoutParams
+        val startW = lp.width
+        val startH = lp.height
+        val right = lp.leftMargin + lp.width
+        val endW = if (::navPill.isInitialized && navPill.width > 0) navPill.width else dp(130)
+        val endH = if (::navPill.isInitialized && navPill.height > 0) navPill.height else dp(38)
+        val bg = navMenuBg
+        val inner = ((panel.getChildAt(0) as? ViewGroup)?.getChildAt(0)) as? ViewGroup
+        if (inner != null) for (k in 0 until inner.childCount) {
+            val r = inner.getChildAt(k)
+            r.animate().cancel()
+            r.animate().alpha(0f).setStartDelay(0).setDuration(90).start()
+        }
+        navMenuAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 230
+            startDelay = 60
+            interpolator = AccelerateDecelerateInterpolator()
+            addUpdateListener {
+                val p = it.animatedValue as Float
+                val w = startW + ((endW - startW) * p).toInt()
+                lp.width = w
+                lp.height = startH + ((endH - startH) * p).toInt()
+                lp.leftMargin = right - w
+                panel.layoutParams = lp
+                bg?.cornerRadius = dp(28) - dp(9) * p
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    finishNavClose(panel)
+                    then?.invoke()
+                }
+            })
+            start()
+        }
+    }
+
+    private fun finishNavClose(panel: FrameLayout) {
+        if (navMenuPanel !== panel) return
+        (panel.parent as? ViewGroup)?.removeView(panel)
+        navMenuScrim?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        navMenuPanel = null
+        navMenuScrim = null
+        navMenuBg = null
+        if (::homeRoot.isInitialized) homeRoot.descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS
+        if (::drawerView.isInitialized) drawerView.descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS
+        if (::navPill.isInitialized) {
+            navPill.visibility = View.VISIBLE
+            navPill.requestFocus()
+        }
     }
 
     /* ─────────── الهيدر ─────────── */
@@ -1350,9 +1513,9 @@ class MainActivity : Activity() {
         rightCluster.addView(greetingTv)
         rightCluster.addView(clockLine)
         clockCluster = rightCluster
-        h.addView(buildNavPill(), LinearLayout.LayoutParams(-2, dp(44)).apply {
+        h.addView(buildNavPill(), LinearLayout.LayoutParams(-2, -2).apply {
             gravity = Gravity.TOP
-            topMargin = dp(2)
+            topMargin = dp(4)
         })
         h.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
         h.addView(rightCluster, LinearLayout.LayoutParams(-2, -2))
@@ -1460,6 +1623,39 @@ class MainActivity : Activity() {
         background = solidCard(Color.argb(30, 255, 255, 255), 1)
     }
 
+    // التحية والساعة الكبيرة والتاريخ (مثل المعاينة). حجم الساعة يتكيّف مع المساحة المتاحة
+    private fun buildHero(): View {
+        heroGreetTv = tv(17f, false, Color.argb(175, 255, 255, 255)).apply {
+            letterSpacing = 0.02f
+            visibility = if (pBool("show_greeting", true)) View.VISIBLE else View.GONE
+        }
+        heroClockTv = tv(64f, false, Color.WHITE).apply {
+            includeFontPadding = false
+            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+        }
+        heroDateTv = tv(15f, false, Color.argb(160, 255, 255, 255)).apply {
+            maxLines = 2
+            setLineSpacing(0f, 1.1f)
+        }
+        val box = LinearLayout(this).unclip().apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), 0, dp(8), 0)
+            addView(heroGreetTv)
+            addView(heroClockTv, LinearLayout.LayoutParams(-2, -2).apply {
+                topMargin = dp(2)
+                bottomMargin = dp(2)
+            })
+            addView(heroDateTv)
+        }
+        return FrameLayout(this).unclip().apply {
+            addView(box, FrameLayout.LayoutParams(-2, -2, Gravity.START or Gravity.CENTER_VERTICAL))
+            addOnLayoutChangeListener { _, _, t, _, b, _, _, _, _ ->
+                val px = ((b - t) * 0.46f).coerceIn(dp(32).toFloat(), dp(72).toFloat())
+                if (Math.abs(heroClockTv.textSize - px) > 1.5f) heroClockTv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, px)
+            }
+        }
+    }
+
     private fun buildHomePage(): View {
         val col = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.VERTICAL
@@ -1479,8 +1675,8 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(4), 0, dp(12), 0)
         }
-        weatherCol.addView(tv(10.5f, true, muted).apply { text = "محدث تلقائياً" })
-        cityHeaderTv = tv(15f, true, accent).apply {
+        weatherCol.addView(tv(10.5f, true, Color.argb(150, 255, 255, 255)).apply { text = "محدث تلقائياً" })
+        cityHeaderTv = tv(15f, true, Color.WHITE).apply {
             text = "الطقس • ${city().name}"
             setPadding(0, dp(2), 0, dp(6))
         }
@@ -1514,8 +1710,8 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(4), 0, dp(12), 0)
         }
-        prayerCol.addView(tv(10.5f, true, muted).apply { text = "التوقيت المحلي" })
-        prayerCol.addView(tv(15f, true, accent).apply {
+        prayerCol.addView(tv(10.5f, true, Color.argb(150, 255, 255, 255)).apply { text = "التوقيت المحلي" })
+        prayerCol.addView(tv(15f, true, Color.WHITE).apply {
             text = "مواقيت الصلاة"
             setPadding(0, dp(2), 0, dp(6))
         })
@@ -1535,8 +1731,8 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         val mTitles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        mTitles.addView(tv(10.5f, true, muted).apply { text = "نتائج ومواعيد مباشرة" })
-        mTitles.addView(tv(15f, true, accent).apply { text = "مباريات اليوم"; setPadding(0, dp(2), 0, 0) })
+        mTitles.addView(tv(10.5f, true, Color.argb(150, 255, 255, 255)).apply { text = "نتائج ومواعيد مباشرة" })
+        mTitles.addView(tv(15f, true, Color.WHITE).apply { text = "مباريات اليوم"; setPadding(0, dp(2), 0, 0) })
         mHead.addView(mTitles)
         tickerTv = tv(11f, false, dim).apply {
             setSingleLine(true)
@@ -1576,9 +1772,9 @@ class MainActivity : Activity() {
         else if (added > 0) unifiedBoard.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
         if (added == 0) unifiedBoard.visibility = View.GONE
 
-        col.addView(unifiedBoard, LinearLayout.LayoutParams(-1, -2))
-        // مساحة مرنة تدفع شريط المفضلة لأسفل الشاشة
-        col.addView(View(this), LinearLayout.LayoutParams(-1, 0, 1f))
+        // البطل يأخذ المساحة المرنة فوق اللوحة، واللوحة والمفضلة تثبت بأسفل الشاشة
+        col.addView(buildHero(), LinearLayout.LayoutParams(-1, 0, 1f))
+        col.addView(unifiedBoard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
 
         // المفضلة (Dock) في أسفل الشاشة
         val dock = LinearLayout(this).apply {
@@ -1594,6 +1790,10 @@ class MainActivity : Activity() {
             setPadding(dp(16), dp(6), dp(16), dp(6))
             visibility = View.GONE
         }
+        dock.addView(tv(15f, true, Color.WHITE).apply {
+            text = "المفضلة"
+            setPadding(dp(6), dp(2), dp(6), dp(2))
+        }, LinearLayout.LayoutParams(-1, -2))
         dock.addView(reorderHintTv, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
         favRow = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1609,7 +1809,7 @@ class MainActivity : Activity() {
             addView(favRow)
         }, LinearLayout.LayoutParams(-1, -2))
         if (pBool("show_all_apps", true)) {
-            dock.addView(tv(10.5f, true, muted).apply {
+            dock.addView(tv(10.5f, true, Color.argb(130, 255, 255, 255)).apply {
                 text = "▼   جميع التطبيقات"
                 gravity = Gravity.CENTER
                 letterSpacing = 0.05f
@@ -1645,11 +1845,11 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(14), 0, dp(14), dp(4))
         }
-        head.addView(tv(19f, true, accent).apply { text = "جميع التطبيقات" })
-        drawerCountTv = tv(12f, true, muted).apply { setPadding(dp(12), dp(3), 0, 0) }
+        head.addView(tv(19f, true, Color.WHITE).apply { text = "جميع التطبيقات" })
+        drawerCountTv = tv(12f, true, Color.argb(160, 255, 255, 255)).apply { setPadding(dp(12), dp(3), 0, 0) }
         head.addView(drawerCountTv)
         head.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
-        head.addView(tv(11f, false, muted).apply { text = "▲ للرجوع للرئيسية   •   ضغطة مطولة للخيارات" })
+        head.addView(tv(11f, false, Color.argb(160, 255, 255, 255)).apply { text = "▲ للرجوع للرئيسية   •   ضغطة مطولة للخيارات" })
         drawerPanel.addView(head, LinearLayout.LayoutParams(-1, -2))
 
         allGrid = GridLayout(this).unclip().apply {
@@ -1726,7 +1926,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(10), dp(8), dp(10), dp(24))
         }
-        col.addView(tv(20f, true, accent).apply { text = "جدول مباريات اليوم"; setPadding(dp(8), dp(4), dp(8), dp(10)) })
+        col.addView(tv(20f, true, Color.WHITE).apply { text = "جدول مباريات اليوم"; setPadding(dp(8), dp(4), dp(8), dp(10)) })
         matchesGrid = GridLayout(this).unclip().apply {
             columnCount = 3
             setPadding(dp(12), dp(12), dp(12), dp(20))
@@ -1895,6 +2095,134 @@ class MainActivity : Activity() {
                     ch.lineTo(cx - 2.6f * d, cy + 5.4f * d)
                     cv.drawPath(ch, p)
                 }
+                12 -> {   // بيت مصمت بباب مفتوح
+                    p.style = Paint.Style.FILL
+                    val h = Path().apply { fillType = Path.FillType.EVEN_ODD }
+                    h.moveTo(cx, cy - 9.8f * d)
+                    h.lineTo(cx + 10.2f * d, cy - 0.2f * d)
+                    h.lineTo(cx + 7.8f * d, cy - 0.2f * d)
+                    h.lineTo(cx + 7.8f * d, cy + 8.6f * d)
+                    h.lineTo(cx - 7.8f * d, cy + 8.6f * d)
+                    h.lineTo(cx - 7.8f * d, cy - 0.2f * d)
+                    h.lineTo(cx - 10.2f * d, cy - 0.2f * d)
+                    h.close()
+                    h.addRect(cx - 2.3f * d, cy + 3.4f * d, cx + 2.3f * d, cy + 8.6f * d, Path.Direction.CW)
+                    cv.drawPath(h, p)
+                }
+                13 -> {   // كرة قدم مصمتة
+                    p.style = Paint.Style.FILL
+                    val b = Path().apply { fillType = Path.FillType.EVEN_ODD }
+                    b.addCircle(cx, cy, 9.8f * d, Path.Direction.CW)
+                    val pent = Path()
+                    for (k in 0 until 5) {
+                        val a = Math.toRadians((-90 + k * 72).toDouble())
+                        val x = cx + 3.9f * d * Math.cos(a).toFloat()
+                        val y = cy + 3.9f * d * Math.sin(a).toFloat()
+                        if (k == 0) pent.moveTo(x, y) else pent.lineTo(x, y)
+                    }
+                    pent.close()
+                    b.addPath(pent)
+                    val m = Matrix()
+                    for (k in 0 until 5) {
+                        val spoke = Path()
+                        spoke.addRect(-0.8f * d, -9.5f * d, 0.8f * d, -4.7f * d, Path.Direction.CW)
+                        m.reset()
+                        m.setRotate((k * 72).toFloat())
+                        m.postTranslate(cx, cy)
+                        spoke.transform(m)
+                        b.addPath(spoke)
+                    }
+                    cv.drawPath(b, p)
+                }
+                14 -> {   // ترس مصمت
+                    p.style = Paint.Style.FILL
+                    val g = Path().apply { fillType = Path.FillType.EVEN_ODD }
+                    val rIn = 7.4f * d
+                    val rOut = 9.9f * d
+                    var first = true
+                    for (k in 0 until 8) {
+                        val base = Math.toRadians((k * 45).toDouble())
+                        for ((deg, r) in listOf(-15.0 to rIn, -9.0 to rOut, 9.0 to rOut, 15.0 to rIn)) {
+                            val a = base + Math.toRadians(deg)
+                            val x = cx + r * Math.cos(a).toFloat()
+                            val y = cy + r * Math.sin(a).toFloat()
+                            if (first) { g.moveTo(x, y); first = false } else g.lineTo(x, y)
+                        }
+                    }
+                    g.close()
+                    g.addCircle(cx, cy, 3.3f * d, Path.Direction.CW)
+                    cv.drawPath(g, p)
+                }
+                15 -> {   // شبكة تطبيقات مصمتة
+                    p.style = Paint.Style.FILL
+                    for (ox in listOf(-8.8f, 1.8f)) for (oy in listOf(-8.8f, 1.8f))
+                        cv.drawRoundRect(cx + ox * d, cy + oy * d, cx + (ox + 7f) * d, cy + (oy + 7f) * d, 2f * d, 2f * d, p)
+                }
+                16 -> {   // دبوس موقع مصمت
+                    p.style = Paint.Style.FILL
+                    val tri = Path()
+                    tri.moveTo(cx - 5.4f * d, cy + 2.2f * d)
+                    tri.lineTo(cx + 5.4f * d, cy + 2.2f * d)
+                    tri.lineTo(cx, cy + 10f * d)
+                    tri.close()
+                    cv.drawPath(tri, p)
+                    val head = Path().apply { fillType = Path.FillType.EVEN_ODD }
+                    head.addCircle(cx, cy - 2.6f * d, 7f * d, Path.Direction.CW)
+                    head.addCircle(cx, cy - 2.6f * d, 2.7f * d, Path.Direction.CW)
+                    cv.drawPath(head, p)
+                }
+                17 -> {   // واي فاي عريض
+                    p.style = Paint.Style.STROKE
+                    p.strokeWidth = 2.8f * d
+                    for (r in listOf(4.4f, 8f, 11.6f)) cv.drawArc(cx - r * d, cy + 5.5f * d - r * d, cx + r * d, cy + 5.5f * d + r * d, 228f, 84f, false, p)
+                    p.style = Paint.Style.FILL
+                    cv.drawCircle(cx, cy + 5.5f * d, 1.9f * d, p)
+                }
+                18 -> {   // شاشة
+                    p.style = Paint.Style.FILL
+                    cv.drawRoundRect(cx - 9.8f * d, cy - 8f * d, cx + 9.8f * d, cy + 4.6f * d, 2.4f * d, 2.4f * d, p)
+                    cv.drawRect(cx - 1.5f * d, cy + 5f * d, cx + 1.5f * d, cy + 7.8f * d, p)
+                    cv.drawRoundRect(cx - 5.2f * d, cy + 7.6f * d, cx + 5.2f * d, cy + 9.8f * d, 1f * d, 1f * d, p)
+                }
+                19 -> {   // سماعة
+                    p.style = Paint.Style.FILL
+                    val s = Path()
+                    s.moveTo(cx - 9f * d, cy - 3.4f * d)
+                    s.lineTo(cx - 4.6f * d, cy - 3.4f * d)
+                    s.lineTo(cx + 0.4f * d, cy - 8f * d)
+                    s.lineTo(cx + 0.4f * d, cy + 8f * d)
+                    s.lineTo(cx - 4.6f * d, cy + 3.4f * d)
+                    s.lineTo(cx - 9f * d, cy + 3.4f * d)
+                    s.close()
+                    cv.drawPath(s, p)
+                    p.style = Paint.Style.STROKE
+                    p.strokeWidth = 1.9f * d
+                    cv.drawArc(cx - 3f * d, cy - 4f * d, cx + 5f * d, cy + 4f * d, -45f, 90f, false, p)
+                    cv.drawArc(cx - 7f * d, cy - 8f * d, cx + 9f * d, cy + 8f * d, -45f, 90f, false, p)
+                }
+                20 -> {   // معلومات مصمتة
+                    p.style = Paint.Style.FILL
+                    val inf = Path().apply { fillType = Path.FillType.EVEN_ODD }
+                    inf.addCircle(cx, cy, 9.8f * d, Path.Direction.CW)
+                    inf.addCircle(cx, cy - 4.2f * d, 1.35f * d, Path.Direction.CW)
+                    inf.addRect(cx - 1.25f * d, cy - 1.4f * d, cx + 1.25f * d, cy + 5.6f * d, Path.Direction.CW)
+                    cv.drawPath(inf, p)
+                }
+                21 -> {   // ساعة (الأخيرة)
+                    p.style = Paint.Style.FILL
+                    val c2 = Path().apply { fillType = Path.FillType.EVEN_ODD }
+                    c2.addCircle(cx, cy, 9.8f * d, Path.Direction.CW)
+                    val hands = Path()
+                    hands.moveTo(cx - 1.2f * d, cy - 6f * d)
+                    hands.lineTo(cx + 1.2f * d, cy - 6f * d)
+                    hands.lineTo(cx + 1.2f * d, cy + 1.2f * d)
+                    hands.lineTo(cx + 5f * d, cy + 1.2f * d)
+                    hands.lineTo(cx + 5f * d, cy + 3.6f * d)
+                    hands.lineTo(cx - 1.2f * d, cy + 3.6f * d)
+                    hands.close()
+                    c2.addPath(hands)
+                    cv.drawPath(c2, p)
+                }
             }
         }
     }
@@ -2003,7 +2331,7 @@ class MainActivity : Activity() {
     private fun openCityPicker() {
         val (dialog, sheet) = shell()
         val cur = city()
-        sheet.addView(tv(19f, true, accent).apply { text = "اختر مدينتك (الطقس والصلاة)" })
+        sheet.addView(tv(19f, true, Color.WHITE).apply { text = "اختر مدينتك (الطقس والصلاة)" })
         sheet.addView(tv(11.5f, false, dim).apply {
             text = "الحالية: ${cur.name}" + (if (cur.sub.isNotEmpty()) "  •  ${cur.sub}" else "")
             setPadding(0, dp(2), 0, dp(12))
@@ -2043,7 +2371,7 @@ class MainActivity : Activity() {
         }
         fun showCities(title: String, list: List<City>, focusFirst: Boolean) {
             citiesList.removeAllViews()
-            citiesList.addView(tv(12f, true, muted).apply { text = title; setPadding(dp(6), 0, dp(6), dp(6)) })
+            citiesList.addView(tv(12f, true, Color.argb(160, 255, 255, 255)).apply { text = title; setPadding(dp(6), 0, dp(6), dp(6)) })
             for (c in list) {
                 citiesList.addView(pickRow(c.name, c.sub, isCur(c), null) { choose(c) }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
             }
@@ -2104,9 +2432,9 @@ class MainActivity : Activity() {
             groupsList.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
             if (has && focusGroup == null) focusGroup = row
         }
-        groupsList.addView(tv(12f, true, muted).apply { text = "🇸🇦  المملكة العربية السعودية"; setPadding(dp(6), 0, dp(6), dp(6)) })
+        groupsList.addView(tv(12f, true, Color.argb(160, 255, 255, 255)).apply { text = "🇸🇦  المملكة العربية السعودية"; setPadding(dp(6), 0, dp(6), dp(6)) })
         for ((name, list) in Data.saudiRegions) addGroup(name, list, "${list.size} مدن")
-        groupsList.addView(tv(12f, true, muted).apply { text = "الدول العربية"; setPadding(dp(6), dp(10), dp(6), dp(6)) })
+        groupsList.addView(tv(12f, true, Color.argb(160, 255, 255, 255)).apply { text = "الدول العربية"; setPadding(dp(6), dp(10), dp(6), dp(6)) })
         for ((name, list) in Data.arabCountries) addGroup(name, list, "${list.size} مدن")
 
         val start = focusGroup ?: groupsList.getChildAt(1)
@@ -2142,7 +2470,7 @@ class MainActivity : Activity() {
 
     private fun pickAppFor(key: String, label: String) {
         val (dialog, box) = shell()
-        box.addView(tv(18f, true, accent).apply { text = "اختر تطبيقاً للزر $label"; setPadding(0, 0, 0, dp(12)) })
+        box.addView(tv(18f, true, Color.WHITE).apply { text = "اختر تطبيقاً للزر $label"; setPadding(0, 0, 0, dp(12)) })
         val list = LinearLayout(this).unclip().apply { orientation = LinearLayout.VERTICAL }
         list.addView(optionRow("بدون تعيين") {
             prefs.edit().remove(key).apply()
@@ -2227,7 +2555,7 @@ class MainActivity : Activity() {
 
     private fun showRecentApps() {
         val (dialog, box) = shell()
-        box.addView(tv(19f, true, accent).apply { text = "التطبيقات" })
+        box.addView(tv(19f, true, Color.WHITE).apply { text = "التطبيقات" })
         box.addView(tv(11.5f, false, dim).apply { text = "التطبيقات التي تم فتحها مؤخراً"; setPadding(0, dp(2), 0, dp(12)) })
         val list = LinearLayout(this).unclip().apply { orientation = LinearLayout.VERTICAL }
         if (!hasUsageAccess()) {
@@ -2271,7 +2599,29 @@ class MainActivity : Activity() {
 
     private fun setUpdateMsg(m: String) {
         updateMsg = m
-        updateSubTv?.text = m
+        refreshUpdateUi()
+    }
+
+    // يحدّث صف التحديث في مكانه (العنوان والوصف وشريط التقدم) بدون إعادة بناء القسم، فما يضيع التركيز
+    private fun refreshUpdateUi() {
+        val info = updateInfo
+        val newer = info != null && info.code > curVersionCode()
+        updTitleTv?.text = when {
+            downloading -> if (updProgress >= 0) nd("جاري التحميل $updProgress%") else "جاري التحضير…"
+            newer -> "تحميل وتثبيت ${info!!.name}"
+            else -> "التحقق من التحديث"
+        }
+        updateSubTv?.text = when {
+            updateMsg.isNotEmpty() -> updateMsg
+            newer -> "يوجد إصدار جديد: ${info!!.name}"
+            else -> "اضغط للتحقق من وجود إصدار جديد"
+        }
+        updBar?.let {
+            it.visibility = if (downloading && updProgress >= 0) View.VISIBLE else View.GONE
+            it.frac = if (updProgress >= 0) updProgress / 100f else 0f
+            it.invalidate()
+        }
+        if (currentPage == 2 && currentSection == 6) renderSummary()
     }
 
     // يقرأ آخر إصدار من GitHub مباشرة (رقم الإصدار = رقم البناء)
@@ -2306,7 +2656,7 @@ class MainActivity : Activity() {
                         updateInfo = null
                         if (!silent) setUpdateMsg("أنت على آخر إصدار ✓")
                     }
-                    if (currentPage == 2 && currentSection == 6) refreshSection()
+                    refreshUpdateUi()
                     if (thenInstall && updateInfo != null) startUpdate()
                 }
             } catch (e: Throwable) {
@@ -2320,7 +2670,7 @@ class MainActivity : Activity() {
         if (prefs.getInt("update_offered", 0) == info.code || isFinishing) return
         prefs.edit().putInt("update_offered", info.code).apply()
         val (dialog, box) = shell()
-        box.addView(tv(19f, true, accent).apply { text = "⬇️  تحديث جديد للواجهة"; setPadding(0, 0, 0, dp(6)) })
+        box.addView(tv(19f, true, Color.WHITE).apply { text = "⬇️  تحديث جديد للواجهة"; setPadding(0, 0, 0, dp(6)) })
         box.addView(tv(13f, false, dim).apply {
             text = nd("الإصدار ${info.name} جاهز (عندك ${curVersionCode()})")
             setPadding(0, 0, 0, dp(14))
@@ -2349,7 +2699,8 @@ class MainActivity : Activity() {
             return
         }
         downloading = true
-        setUpdateMsg("جاري التحميل 0%")
+        updProgress = 0
+        setUpdateMsg("جاري التحميل ${nd("0")}%")
         thread {
             try {
                 val conn = URL(info.apk).openConnection() as HttpURLConnection
@@ -2373,9 +2724,12 @@ class MainActivity : Activity() {
                             done += n
                             if (total > 0) {
                                 val pct = (done * 100 / total).toInt()
-                                if (pct != lastPct && pct % 4 == 0) {
+                                if (pct != lastPct && pct % 2 == 0) {
                                     lastPct = pct
-                                    ui.post { setUpdateMsg("جاري التحميل $pct%") }
+                                    ui.post {
+                                        updProgress = pct
+                                        setUpdateMsg("جاري التحميل ${nd("$pct")}%")
+                                    }
                                 }
                             }
                         }
@@ -2385,12 +2739,16 @@ class MainActivity : Activity() {
                 val cb = Intent(this, MainActivity::class.java).setAction(installAction).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) 33554432 else 0)
                 val pending = PendingIntent.getActivity(this, id, cb, flags)
-                ui.post { setUpdateMsg("جاري التثبيت… وافق على رسالة النظام") }
+                ui.post {
+                    updProgress = -1
+                    setUpdateMsg("جاري التثبيت… وافق على رسالة النظام")
+                }
                 session.commit(pending.intentSender)
                 session.close()
             } catch (e: Throwable) {
                 ui.post {
                     downloading = false
+                    updProgress = -1
                     setUpdateMsg("فشل التحميل، تأكد من الاتصال وحاول مرة ثانية")
                 }
             }
@@ -2400,7 +2758,8 @@ class MainActivity : Activity() {
     @Suppress("DEPRECATION")
     private fun handleInstallResult(i: Intent) {
         setIntent(Intent(Intent.ACTION_MAIN))   // ما نعيد معالجة نفس النتيجة لو انبنت الواجهة من جديد
-        if (::pages.isInitialized) openSection(6)
+        if (::pages.isInitialized && !(currentPage == 2 && currentSection == 6)) openSection(6)
+        updProgress = -1
         when (i.getIntExtra(PackageInstaller.EXTRA_STATUS, -999)) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 val confirm = i.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
@@ -2455,7 +2814,7 @@ class MainActivity : Activity() {
                     settingsContent.getChildAt(0)?.requestFocus()
                 }
                 setOnFocusChangeListener { _, f ->
-                    if (f && (i != currentSection || settingsContent.childCount == 0)) {
+                    if (f && !suppressNav && (i != currentSection || settingsContent.childCount == 0)) {
                         navTarget = i
                         ui.removeCallbacks(navTask)
                         ui.postDelayed(navTask, 60)
@@ -2588,7 +2947,12 @@ class MainActivity : Activity() {
         showPage(2)
     }
 
-    private fun showSection(i: Int, animate: Boolean = false) {
+    // quiet = إعادة بناء نفس القسم: يسقط التركيز مؤقتاً على أول عنصر بالقائمة الجانبية، فنتجاهله حتى لا ينتقل القسم
+    private fun showSection(i: Int, animate: Boolean = false, keepScrollY: Int = -1, quiet: Boolean = false) {
+        if (quiet) {
+            suppressNav = true
+            ui.removeCallbacks(clearSuppress)
+        }
         currentSection = i.coerceIn(0, sectionNames.size - 1)
         settingsTitleTv.text = sectionNames[currentSection]
         settingsSubTv.text = sectionSubs[currentSection]
@@ -2598,6 +2962,8 @@ class MainActivity : Activity() {
         settingsContent.layoutTransition = null
         settingsContent.removeAllViews()
         updateSubTv = null
+        updTitleTv = null
+        updBar = null
         when (currentSection) {
             0 -> buildAppearance()
             1 -> buildLanguage()
@@ -2607,8 +2973,10 @@ class MainActivity : Activity() {
             5 -> buildHomeSection()
             else -> buildAboutSection()
         }
-        settingsScroll.scrollTo(0, 0)
+        if (keepScrollY >= 0) settingsScroll.post { settingsScroll.scrollTo(0, keepScrollY) }
+        else settingsScroll.scrollTo(0, 0)
         styleNav()
+        if (quiet) ui.postDelayed(clearSuppress, 240)
         if (animate) {
             settingsContent.animate().cancel()
             settingsContent.alpha = 0f
@@ -2622,7 +2990,7 @@ class MainActivity : Activity() {
     private fun refreshSection() {
         if (!::settingsContent.isInitialized) return
         val r = lastFocusedRow
-        showSection(currentSection)
+        showSection(currentSection, false, settingsScroll.scrollY, true)
         settingsContent.post {
             settingsContent.getChildAt(r.coerceIn(0, maxOf(0, settingsContent.childCount - 1)))?.requestFocus()
         }
@@ -2633,9 +3001,10 @@ class MainActivity : Activity() {
     }
 
     private fun addHeader(text: String) {
-        settingsContent.addView(tv(12.5f, true, muted).apply {
+        settingsContent.addView(tv(12.5f, true, Color.argb(160, 255, 255, 255)).apply {
             this.text = text
-            setPadding(dp(4), dp(10), dp(4), dp(2))
+            letterSpacing = 0.04f
+            setPadding(dp(4), dp(14), dp(4), dp(4))
         }, LinearLayout.LayoutParams(-1, -2))
     }
 
@@ -2645,9 +3014,11 @@ class MainActivity : Activity() {
         sub: String = "",
         trailing: View? = null,
         onKey: ((Int) -> Boolean)? = null,
+        titleOut: ((TextView) -> Unit)? = null,
         onClick: () -> Unit
     ): LinearLayout {
         val t = tv(14.5f, true, Color.WHITE).apply { text = title }
+        titleOut?.invoke(t)
         val s = tv(11f, false, dim).apply {
             text = sub
             visibility = if (sub.isEmpty()) View.GONE else View.VISIBLE
@@ -2662,6 +3033,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             background = slateGlass(170, 16, Color.argb(40, 255, 255, 255), 1)
             setPadding(dp(18), dp(12), dp(18), dp(12))
+            minimumHeight = dp(60)
             isFocusable = true
             isClickable = true
             roundOutline(16)
@@ -2706,7 +3078,7 @@ class MainActivity : Activity() {
             visibility = if (swatches != null) View.VISIBLE else View.GONE
             if (swatches != null) background = solidCard(swatches[cur], 8, Color.argb(220, 255, 255, 255), 1)
         }
-        val valTv = tv(13f, true, accent).apply { text = opts[cur] }
+        val valTv = tv(13.5f, true, Color.WHITE).apply { text = opts[cur] }
         val arrow = tv(11f, true, dim).apply { text = "▾" }
         val trailing = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -2740,12 +3112,12 @@ class MainActivity : Activity() {
     }
 
     private fun buildChip(label: String, swatch: Int?, selected: Boolean): LinearLayout {
-        val txt = tv(13.5f, true, if (selected) accent else Color.WHITE).apply {
+        val txt = tv(13.5f, true, Color.WHITE).apply {
             text = if (selected) "✓ $label" else label
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
         }
-        fun idle(): Drawable = slateGlass(if (selected) 215 else 150, 22, if (selected) accent else Color.argb(40, 255, 255, 255), 1)
+        fun idle(): Drawable = slateGlass(if (selected) 215 else 150, 22, if (selected) Color.argb(210, 255, 255, 255) else Color.argb(40, 255, 255, 255), 1)
         return LinearLayout(this).unclip().apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -2761,7 +3133,7 @@ class MainActivity : Activity() {
             addView(txt)
             setOnFocusChangeListener { v, f ->
                 v.background = if (f) focusBg(22) else idle()
-                txt.setTextColor(if (f) focusFg() else if (selected) accent else Color.WHITE)
+                txt.setTextColor(if (f) focusFg() else Color.WHITE)
                 v.translationZ = if (f) dp(8).toFloat() else 0f
                 v.animate().scaleX(if (f) 1.05f else 1f).scaleY(if (f) 1.05f else 1f).setDuration(130).start()
             }
@@ -2778,7 +3150,7 @@ class MainActivity : Activity() {
         val ac = accent
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = slateGlass(190, 18, Color.argb(120, Color.red(ac), Color.green(ac), Color.blue(ac)), 1)
+            background = slateGlass(190, 18, Color.argb(60, 255, 255, 255), 1)
             setPadding(dp(14), dp(10), dp(14), dp(10))
             tag = row
             clipChildren = true
@@ -2795,7 +3167,7 @@ class MainActivity : Activity() {
             val chip = buildChip(o, swatches?.getOrNull(i), i == cur)
             chip.setOnClickListener {
                 closePicker(true)
-                ui.postDelayed({ onSelect(i) }, 180)
+                ui.postDelayed({ onSelect(i) }, 90)
             }
             chip.setOnKeyListener { v, code, ev ->
                 when (code) {
@@ -2864,7 +3236,7 @@ class MainActivity : Activity() {
 
     private fun sSlider(title: String, sub: String, key: String, min: Int, max: Int, step: Int, def: Int): View {
         val bar = WmBar(this).apply { barColor = accent }
-        val valTv = tv(13f, true, accent).apply { gravity = Gravity.CENTER }
+        val valTv = tv(13.5f, true, Color.WHITE).apply { gravity = Gravity.CENTER }
         var cur = pInt(key, def).coerceIn(min, max)
         fun upd() {
             bar.frac = (cur - min).toFloat() / (max - min).toFloat()
@@ -2896,7 +3268,7 @@ class MainActivity : Activity() {
 
     private fun keyRow(label: String, key: String): View {
         val cur = prefs.getString(key, "") ?: ""
-        val valTv = tv(13f, true, accent).apply { text = if (cur.isEmpty()) "بدون" else appLabel(cur) }
+        val valTv = tv(13.5f, true, Color.WHITE).apply { text = if (cur.isEmpty()) "بدون" else appLabel(cur) }
         return sRow("الزر $label", "يفتح التطبيق المحدد من أي مكان", valTv) { pickAppFor(key, label) }
     }
 
@@ -2934,8 +3306,8 @@ class MainActivity : Activity() {
     }
 
     private fun buildRemote() {
-        addRow(sToggle("منع أزرار التلفزيون", "يمنع أزرار TV / Guide / DVR من فتح شاشات أخرى", "block_keys", true))
-        addRow(sToggle("زر القائمة يفتح الإعدادات", "زر Menu في الريموت", "menu_key", true))
+        addRow(sToggle("منع أزرار التلفزيون", "يمنع أزرار TV / Guide / DVR من فتح شاشات أخرى", "block_keys", true, rebuild = false))
+        addRow(sToggle("زر القائمة يفتح الإعدادات", "زر Menu في الريموت", "menu_key", true, rebuild = false))
         addHeader("الأزرار الملونة")
         addRow(keyRow("الأحمر", "key_red"))
         addRow(keyRow("الأخضر", "key_green"))
@@ -2945,7 +3317,7 @@ class MainActivity : Activity() {
 
     private fun buildWeatherSection() {
         val c = city()
-        val cityTv = tv(13f, true, accent).apply { text = c.name }
+        val cityTv = tv(13.5f, true, Color.WHITE).apply { text = c.name }
         addRow(sRow("المدينة", if (c.sub.isNotEmpty()) c.sub else "للطقس ومواقيت الصلاة", cityTv) { openCityPicker() })
         addRow(sRow("📍 تحديد موقعي تلقائياً", "عن طريق الشبكة (بدون GPS)", null) { autoLocate() })
         addRow(sToggle("إظهار الطقس", "في الصفحة الرئيسية", "show_weather", true))
@@ -2994,14 +3366,28 @@ class MainActivity : Activity() {
         card.addView(brandTexts, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(14) })
         addRow(card)
 
-        val checkRow = sRow("التحقق من التحديث", if (updateMsg.isEmpty()) "اضغط للتحقق من وجود إصدار جديد" else updateMsg, null) { checkUpdate() }
+        val bar = WmBar(this).apply {
+            barColor = Color.WHITE
+            visibility = View.GONE
+        }
+        updBar = bar
+        val checkRow = sRow(
+            "التحقق من التحديث",
+            if (updateMsg.isEmpty()) "اضغط للتحقق من وجود إصدار جديد" else updateMsg,
+            bar,
+            titleOut = { updTitleTv = it }
+        ) {
+            val i = updateInfo
+            when {
+                downloading -> Unit
+                i != null && i.code > curVersionCode() -> startUpdate()
+                else -> checkUpdate()
+            }
+        }
+        (bar.layoutParams as? LinearLayout.LayoutParams)?.let { it.width = dp(150); it.height = dp(24) }
         updateSubTv = checkRow.tag as? TextView
         addRow(checkRow)
-
-        val info = updateInfo
-        if (info != null && info.code > curVersionCode()) {
-            addRow(sRow("تحميل وتثبيت ${info.name}", if (info.notes.isEmpty()) "تحديث جديد جاهز" else info.notes, null) { startUpdate() })
-        }
+        refreshUpdateUi()
     }
 
     /* ─────────── المباريات ─────────── */
@@ -3462,7 +3848,7 @@ class MainActivity : Activity() {
             tag = pkg
         }
 
-        val titleTv = tv(11.5f, true, if (isMovingThis) gold else dim).apply {
+        val titleTv = tv(12f, true, if (isMovingThis) gold else dim).apply {
             text = if (isMovingThis) "◀  $label  ▶" else label
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
@@ -3570,7 +3956,7 @@ class MainActivity : Activity() {
         }
 
         val (dialog, box) = shell()
-        box.addView(tv(18f, true, accent).apply { text = label; setPadding(0, 0, 0, dp(12)) })
+        box.addView(tv(18f, true, Color.WHITE).apply { text = label; setPadding(0, 0, 0, dp(12)) })
         val opts = mutableListOf<Pair<String, () -> Unit>>()
 
         if (inFav && favs.size > 1) {
@@ -3606,6 +3992,11 @@ class MainActivity : Activity() {
             val m = LocalDate.now().format(DateTimeFormatter.ofPattern("d MMMM", dateLoc()))
             val h = try { HijrahDate.now().format(DateTimeFormatter.ofPattern("d MMMM yyyy هـ", ar)) } catch (e: Throwable) { "" }
             dateLineTv.text = nd(if (h.isNotEmpty()) "$day $m\n$h" else "$day $m")
+            if (::heroClockTv.isInitialized) {
+                heroGreetTv.text = greetingTv.text
+                heroClockTv.text = clockTv.text
+                heroDateTv.text = dateLineTv.text
+            }
 
             if (now.minute != lastMin) {
                 lastMin = now.minute
