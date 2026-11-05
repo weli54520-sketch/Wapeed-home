@@ -59,24 +59,31 @@ class WmAmbient(c: Context, initial: Int) : View(c) {
     private var from = initial
     private var to = initial
     private var phase = 0f
+    private var lastPulse = 0L
     private var base = intArrayOf(0xFF04060A.toInt(), 0xFF0B0E16.toInt(), 0xFF06080F.toInt())
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG)
+    private val eval = ArgbEvaluator()
 
     private val anim = ValueAnimator.ofFloat(0f, 1f).apply {
         duration = 700
         addUpdateListener {
-            color = ArgbEvaluator().evaluate(it.animatedValue as Float, from, to) as Int
+            color = eval.evaluate(it.animatedValue as Float, from, to) as Int
             invalidate()
         }
     }
 
+    // الحركة بطيئة جداً (دورة 18 ثانية) فلا نحتاج أكثر من ~16 إطار بالثانية — يوفّر المعالج للتنقل
     private val pulseAnim = ValueAnimator.ofFloat(0f, (Math.PI * 2).toFloat()).apply {
         duration = 18000
         repeatCount = ValueAnimator.INFINITE
         repeatMode = ValueAnimator.RESTART
         addUpdateListener {
             phase = it.animatedValue as Float
-            invalidate()
+            val now = android.os.SystemClock.uptimeMillis()
+            if (now - lastPulse >= 60) {
+                lastPulse = now
+                invalidate()
+            }
         }
     }
 
@@ -104,13 +111,14 @@ class WmAmbient(c: Context, initial: Int) : View(c) {
         anim.start()
     }
 
-    // الظلال تُبنى مرة وحدة وتتحرك بمصفوفة بدل إنشائها كل إطار (يمنع التقطيع)
+    // التدرجات تُبنى مرة وحدة بلون أبيض، واللون يتغير بفلتر خفيف (بدل إنشاء تدرجات جديدة كل إطار)
     private var bgShader: Shader? = null
     private var g1: RadialGradient? = null
     private var g2: RadialGradient? = null
     private var builtW = 0f
     private var builtH = 0f
     private var builtColor = 0
+    private var tintFilter: ColorFilter? = null
     private var builtBase: IntArray? = null
     private val m1 = Matrix()
     private val m2 = Matrix()
@@ -124,17 +132,22 @@ class WmAmbient(c: Context, initial: Int) : View(c) {
         if (bgShader == null || w != builtW || h != builtH || builtBase !== base) {
             bgShader = LinearGradient(0f, 0f, w, h, base, floatArrayOf(0f, 0.5f, 1f), Shader.TileMode.CLAMP)
             builtBase = base
-            g1 = null
         }
-        if (g1 == null || builtColor != color || w != builtW || h != builtH) {
-            val r = Color.red(color); val g = Color.green(color); val b = Color.blue(color)
-            g1 = RadialGradient(0f, 0f, w * 0.6f, intArrayOf(Color.argb(90, r, g, b), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
-            g2 = RadialGradient(0f, 0f, w * 0.5f, intArrayOf(Color.argb(70, r, g, b), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
+        if (g1 == null || w != builtW || h != builtH) {
+            g1 = RadialGradient(0f, 0f, w * 0.6f, intArrayOf(Color.argb(90, 255, 255, 255), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
+            g2 = RadialGradient(0f, 0f, w * 0.5f, intArrayOf(Color.argb(70, 255, 255, 255), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
             p1.shader = g1
             p2.shader = g2
+            tintFilter = null
+        }
+        if (tintFilter == null || builtColor != color) {
+            tintFilter = PorterDuffColorFilter(color or 0xFF000000.toInt(), PorterDuff.Mode.SRC_IN)
+            p1.colorFilter = tintFilter
+            p2.colorFilter = tintFilter
             builtColor = color
         }
-        builtW = w; builtH = h
+        builtW = w
+        builtH = h
         val dx = Math.sin(phase.toDouble()).toFloat() * w * 0.02f
         val dy = Math.cos(phase.toDouble()).toFloat() * h * 0.02f
         paint.shader = bgShader
@@ -259,6 +272,222 @@ class WmFocusGlass(private val radius: Float, private val strokePx: Float, priva
     override fun setColorFilter(colorFilter: ColorFilter?) {}
     @Suppress("OVERRIDE_DEPRECATION")
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+}
+
+/* ───────────────────────── أيقونة الطقس المتحركة (شمس / قمر / غيوم) ───────────────────────── */
+class WmWeatherIcon(c: Context) : View(c) {
+    private var cat = 0          // 0 صافي، 1 غائم جزئياً، 2 غائم، 3 ضباب، 4 مطر، 5 ثلج، 6 عاصفة
+    private var day = true
+    private var t = 0f
+    private var lastInv = 0L
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val rr = RectF()
+    private val bolt = Path()
+    private val moonPath = Path()
+    private val cutPath = Path()
+    private var moonKey = ""
+
+    private val anim = ValueAnimator.ofFloat(0f, 1f).apply {
+        duration = 6000
+        repeatCount = ValueAnimator.INFINITE
+        interpolator = android.view.animation.LinearInterpolator()
+        addUpdateListener {
+            t = it.animatedValue as Float
+            val now = android.os.SystemClock.uptimeMillis()
+            if (now - lastInv >= 32) {
+                lastInv = now
+                invalidate()
+            }
+        }
+    }
+
+    fun setState(category: Int, isDay: Boolean) {
+        if (category == cat && isDay == day) return
+        cat = category
+        day = isDay
+        invalidate()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (!anim.isStarted) anim.start()
+    }
+
+    override fun onDetachedFromWindow() {
+        anim.cancel()
+        super.onDetachedFromWindow()
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility == VISIBLE) {
+            if (isAttachedToWindow && !anim.isStarted) anim.start()
+        } else anim.cancel()
+    }
+
+    override fun onDraw(cv: Canvas) {
+        val s = minOf(width, height).toFloat()
+        if (s <= 0f) return
+        val ph = t * 2f * Math.PI.toFloat()
+        val sw = Math.sin(ph.toDouble()).toFloat()
+        when (cat) {
+            0 -> if (day) sun(cv, s * 0.5f, s * 0.5f, s * 0.26f, sw)
+                 else moon(cv, s * 0.5f, s * 0.5f, s * 0.26f, sw, true, s, ph)
+            1 -> {
+                if (day) sun(cv, s * 0.37f, s * 0.37f, s * 0.17f, sw)
+                else moon(cv, s * 0.37f, s * 0.37f, s * 0.17f, sw, false, s, ph)
+                cloud(cv, s * 0.58f + sw * s * 0.015f, s * 0.64f, s * 0.64f, false)
+            }
+            2 -> {
+                cloud(cv, s * 0.36f - sw * s * 0.010f, s * 0.40f, s * 0.46f, true)
+                cloud(cv, s * 0.56f + sw * s * 0.015f, s * 0.58f, s * 0.68f, false)
+            }
+            3 -> {
+                cloud(cv, s * 0.5f + sw * s * 0.012f, s * 0.38f, s * 0.70f, false)
+                p.style = Paint.Style.STROKE
+                p.strokeCap = Paint.Cap.ROUND
+                p.strokeWidth = s * 0.05f
+                for (i in 0..2) {
+                    val dx = Math.sin((ph + i * 1.3f).toDouble()).toFloat() * s * 0.04f
+                    val y = s * (0.66f + i * 0.11f)
+                    p.color = Color.argb(210 - i * 35, 196, 208, 228)
+                    cv.drawLine(s * 0.22f + dx, y, s * 0.78f + dx, y, p)
+                }
+            }
+            4 -> {
+                cloud(cv, s * 0.5f + sw * s * 0.012f, s * 0.40f, s * 0.72f, true)
+                p.style = Paint.Style.STROKE
+                p.strokeCap = Paint.Cap.ROUND
+                p.strokeWidth = s * 0.045f
+                for (i in 0..2) {
+                    val f = (t * 2f + i / 3f) % 1f
+                    val x = s * (0.34f + i * 0.16f) - f * s * 0.03f
+                    val y = s * 0.60f + f * s * 0.22f
+                    p.color = Color.argb((255 * Math.sin(f * Math.PI)).toInt(), 110, 182, 255)
+                    cv.drawLine(x, y, x - s * 0.03f, y + s * 0.09f, p)
+                }
+            }
+            5 -> {
+                cloud(cv, s * 0.5f + sw * s * 0.012f, s * 0.40f, s * 0.72f, false)
+                p.style = Paint.Style.FILL
+                for (i in 0..2) {
+                    val f = (t + i / 3f) % 1f
+                    val x = s * (0.34f + i * 0.16f) + Math.sin((ph + i * 2f).toDouble()).toFloat() * s * 0.025f
+                    val y = s * 0.60f + f * s * 0.30f
+                    p.color = Color.argb((255 * Math.sin(f * Math.PI)).toInt(), 255, 255, 255)
+                    cv.drawCircle(x, y, s * 0.032f, p)
+                }
+            }
+            else -> {
+                cloud(cv, s * 0.5f + sw * s * 0.012f, s * 0.38f, s * 0.74f, true)
+                val f = (t * 2f) % 1f
+                val flash = if (f < 0.10f || (f > 0.20f && f < 0.28f)) 1f else 0.6f
+                bolt.reset()
+                bolt.moveTo(s * 0.55f, s * 0.54f)
+                bolt.lineTo(s * 0.40f, s * 0.78f)
+                bolt.lineTo(s * 0.50f, s * 0.78f)
+                bolt.lineTo(s * 0.43f, s * 0.97f)
+                bolt.lineTo(s * 0.66f, s * 0.68f)
+                bolt.lineTo(s * 0.55f, s * 0.68f)
+                bolt.close()
+                p.style = Paint.Style.FILL
+                p.color = Color.argb((255 * flash).toInt(), 255, 210, 64)
+                cv.drawPath(bolt, p)
+            }
+        }
+    }
+
+    // شمس: هالة تنبض + أشعة تدور ببطء + قرص بتدرج
+    private fun sun(cv: Canvas, cx: Float, cy: Float, r: Float, sw: Float) {
+        val pulse = 0.5f + 0.5f * sw
+        p.shader = null
+        p.style = Paint.Style.FILL
+        for (i in 0..2) {
+            p.color = Color.argb(((30 + 22 * pulse) * (1f - i * 0.28f)).toInt(), 255, 190, 50)
+            cv.drawCircle(cx, cy, r * (1.72f - i * 0.22f + 0.08f * pulse), p)
+        }
+        p.style = Paint.Style.STROKE
+        p.strokeCap = Paint.Cap.ROUND
+        p.strokeWidth = r * 0.17f
+        p.color = Color.argb(235, 255, 196, 52)
+        val rot = Math.toRadians((t * 45f).toDouble())
+        val r1 = r * 1.34f
+        val r2 = r * (1.60f + 0.14f * pulse)
+        for (i in 0 until 8) {
+            val a = rot + Math.toRadians(i * 45.0)
+            val ca = Math.cos(a).toFloat()
+            val sa = Math.sin(a).toFloat()
+            cv.drawLine(cx + r1 * ca, cy + r1 * sa, cx + r2 * ca, cy + r2 * sa, p)
+        }
+        p.style = Paint.Style.FILL
+        p.color = Color.rgb(255, 183, 3)
+        cv.drawCircle(cx, cy, r, p)
+        p.color = Color.rgb(255, 205, 64)
+        cv.drawCircle(cx - r * 0.10f, cy - r * 0.10f, r * 0.80f, p)
+        p.color = Color.argb(200, 255, 236, 150)
+        cv.drawCircle(cx - r * 0.24f, cy - r * 0.26f, r * 0.42f, p)
+    }
+
+    // قمر هلال: هالة زرقاء ناعمة + تمايل خفيف + نجوم تلمع
+    private fun moon(cv: Canvas, cx: Float, cy: Float, r: Float, sw: Float, stars: Boolean, s: Float, ph: Float) {
+        val pulse = 0.5f + 0.5f * sw
+        p.shader = null
+        p.style = Paint.Style.FILL
+        for (i in 0..2) {
+            p.color = Color.argb(((26 + 18 * pulse) * (1f - i * 0.28f)).toInt(), 150, 180, 255)
+            cv.drawCircle(cx, cy, r * (1.75f - i * 0.25f), p)
+        }
+        val key = "$cx/$cy/$r"
+        if (key != moonKey) {
+            moonKey = key
+            moonPath.reset()
+            moonPath.addCircle(cx, cy, r, Path.Direction.CW)
+            cutPath.reset()
+            cutPath.addCircle(cx + r * 0.58f, cy - r * 0.30f, r * 0.86f, Path.Direction.CW)
+            moonPath.op(cutPath, Path.Op.DIFFERENCE)
+        }
+        cv.save()
+        cv.rotate(sw * 4f, cx, cy)
+        p.color = Color.rgb(238, 242, 253)
+        cv.drawPath(moonPath, p)
+        p.color = Color.argb(150, 176, 188, 216)
+        cv.drawCircle(cx - r * 0.46f, cy + r * 0.20f, r * 0.13f, p)
+        cv.drawCircle(cx - r * 0.18f, cy + r * 0.52f, r * 0.09f, p)
+        cv.restore()
+        if (stars) {
+            star(cv, s * 0.82f, s * 0.24f, s * 0.075f, ph * 2f)
+            star(cv, s * 0.84f, s * 0.70f, s * 0.050f, ph * 2f + 2.1f)
+            star(cv, s * 0.16f, s * 0.20f, s * 0.050f, ph * 2f + 4.2f)
+        }
+    }
+
+    private fun star(cv: Canvas, x: Float, y: Float, h: Float, a: Float) {
+        val tw = 0.25f + 0.75f * Math.abs(Math.sin(a.toDouble())).toFloat()
+        p.shader = null
+        p.style = Paint.Style.STROKE
+        p.strokeCap = Paint.Cap.ROUND
+        p.strokeWidth = h * 0.35f
+        p.color = Color.argb((235 * tw).toInt(), 255, 244, 205)
+        val l = h * (0.6f + 0.4f * tw)
+        cv.drawLine(x - l, y, x + l, y, p)
+        cv.drawLine(x, y - l, x, y + l, p)
+    }
+
+    private fun cloud(cv: Canvas, cx: Float, cy: Float, w: Float, dark: Boolean) {
+        val shade = if (dark) Color.rgb(112, 124, 146) else Color.rgb(184, 198, 220)
+        val main = if (dark) Color.rgb(178, 190, 210) else Color.rgb(246, 249, 253)
+        p.shader = null
+        p.style = Paint.Style.FILL
+        for (pass in 0..1) {
+            p.color = if (pass == 0) shade else main
+            val dy = if (pass == 0) w * 0.03f else 0f
+            rr.set(cx - w * 0.5f, cy - w * 0.02f + dy, cx + w * 0.5f, cy + w * 0.20f + dy)
+            cv.drawRoundRect(rr, w * 0.11f, w * 0.11f, p)
+            cv.drawCircle(cx - w * 0.17f, cy - w * 0.05f + dy, w * 0.19f, p)
+            cv.drawCircle(cx + w * 0.09f, cy - w * 0.13f + dy, w * 0.26f, p)
+            cv.drawCircle(cx + w * 0.30f, cy - w * 0.01f + dy, w * 0.16f, p)
+        }
+    }
 }
 
 /* ───────────────────────── شعار WM ───────────────────────── */
@@ -401,6 +630,16 @@ class MainActivity : Activity() {
     private lateinit var pages: List<View>
     private lateinit var tabPills: List<LinearLayout>
     private lateinit var tabTexts: List<TextView>
+    private lateinit var tabGlyphs: List<GlyphView>
+    private lateinit var navPill: LinearLayout
+    private lateinit var navPillGlyph: GlyphView
+    private lateinit var navPillLabel: TextView
+    private lateinit var navPillChev: GlyphView
+    private lateinit var clockCluster: View
+    private lateinit var settingsNavGlyphs: List<GlyphView>
+    private lateinit var settingsIconGlyph: GlyphView
+    private lateinit var settingsSummary: LinearLayout
+    private val sectionGlyphs = listOf(6, 7, 8, 9, 4, 3, 10)
     private var currentPage = 0
 
     // درج جميع التطبيقات
@@ -459,8 +698,17 @@ class MainActivity : Activity() {
     private val matchesTask = Runnable { fetchMatches() }
     private val clockTask = Runnable { updateClock() }
     private val rebuildTask = Runnable { doRebuild() }
+    private var navTarget = 0
+    private val navTask = Runnable {
+        val i = navTarget
+        if (::settingsNav.isInitialized && settingsNav.getOrNull(i)?.hasFocus() == true &&
+            (i != currentSection || settingsContent.childCount == 0)) showSection(i, true)
+    }
 
     private var wTemp = "--°"
+    private var wCat = 0
+    private var wDay = LocalTime.now().hour in 6..17
+    private lateinit var weatherIcon: WmWeatherIcon
     private var wStatus = "جاري التحديث..."
     private var wSub = ""
 
@@ -536,7 +784,7 @@ class MainActivity : Activity() {
         prefs.edit().putString("city_v2", Data.encode(c)).apply()
         prayerZone = null
         prayersData = emptyList()
-        wTemp = "--°"; wStatus = "جاري التحديث..."; wSub = ""
+        wTemp = "--°"; wStatus = "جاري التحديث..."; wSub = ""; wCat = 0
         applyWeather()
         if (::cityHeaderTv.isInitialized) cityHeaderTv.text = "الطقس • ${c.name}"
         if (::cityPillTv.isInitialized) cityPillTv.text = c.name
@@ -751,6 +999,7 @@ class MainActivity : Activity() {
             updateClock()
             refreshFeeds()
             ui.postDelayed(updateTask, 8000)
+            if (intent?.action == installAction) handleInstallResult(intent)
             val vc = curVersionCode()
             val last = prefs.getInt("last_version", 0)
             if (last in 1 until vc) Toast.makeText(this, nd("تم التحديث إلى الإصدار ${curVersionName()} ✓"), Toast.LENGTH_LONG).show()
@@ -774,12 +1023,17 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         if (focusAnim.isPaused) focusAnim.resume()
-        if (resumeUpdate) {
+        if (::pages.isInitialized && (resumeUpdate || pBool("resume_update", false))) {
             resumeUpdate = false
-            if (Build.VERSION.SDK_INT < 26 || packageManager.canRequestPackageInstalls()) ui.postDelayed({ startUpdate() }, 400)
-            else setUpdateMsg("ما تم السماح بالتثبيت، اضغط تحميل وتثبيت مرة ثانية")
+            putBool("resume_update", false)
+            openSection(6)
+            if (Build.VERSION.SDK_INT < 26 || packageManager.canRequestPackageInstalls()) {
+                if (updateInfo != null) ui.postDelayed({ startUpdate() }, 400)
+                else checkUpdate(silent = false, thenInstall = true)
+            } else setUpdateMsg("ما تم السماح بالتثبيت، اضغط تحميل وتثبيت مرة ثانية")
         }
-        if (::favRow.isInitialized) loadAppsAndDock()
+        // لا نعيد بناء التطبيقات إلا إذا تغيّرت فعلاً (قبل كان يحمّل كل الأيقونات في كل رجوع)
+        if (::favRow.isInitialized) loadAppsAndDock(force = false)
     }
 
     override fun onNewIntent(intent: Intent?) {
@@ -918,7 +1172,7 @@ class MainActivity : Activity() {
                 }
             } else p.visibility = View.GONE
         }
-        headerView.visibility = if (i == 2) View.GONE else View.VISIBLE
+        headerView.visibility = View.VISIBLE
         updateTabStyles()
         ambient.glow(homeGlow())
         if (i == 2) {
@@ -928,26 +1182,131 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun updateTabStyles() {
-        tabPills.forEachIndexed { k, pill ->
-            val f = pill.hasFocus()
-            val sel = k == currentPage
-            val txt = tabTexts[k]
-            when {
-                f -> {
-                    pill.background = focusBg(26)
-                    txt.setTextColor(focusFg())
-                }
-                sel -> {
-                    pill.background = slateGlass(230, 26, accent, 1)
-                    txt.setTextColor(accent)
-                }
-                else -> {
-                    pill.background = slateGlass(165, 26, Color.argb(45, 255, 255, 255), 1)
-                    txt.setTextColor(Color.WHITE)
-                }
+    private fun updateTabStyles() = updateNavPill()
+
+    private fun updateNavPill() {
+        if (!::navPill.isInitialized) return
+        val (kind, name) = when (currentPage) {
+            0 -> 3 to "الرئيسية"
+            1 -> 4 to "المباريات"
+            else -> 1 to "الإعدادات"
+        }
+        navPillGlyph.setKind(kind)
+        navPillLabel.text = name
+        if (::clockCluster.isInitialized) clockCluster.visibility = if (currentPage == 2) View.GONE else View.VISIBLE
+    }
+
+    // كبسولة الزاوية: سهم رجوع + أيقونة الصفحة الحالية + اسمها، وتفتح قائمة التنقل
+    private fun buildNavPill(): View {
+        val ink = 0xFF0B0E16.toInt()
+        navPillChev = GlyphView(this, 11).apply { setTint(Color.argb(190, 255, 255, 255)) }
+        navPillGlyph = GlyphView(this, 3).apply { setTint(ink) }
+        navPillLabel = tv(15f, true, Color.WHITE)
+        val disc = FrameLayout(this).apply {
+            background = solidCard(Color.WHITE, 17)
+            addView(navPillGlyph, FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER))
+        }
+        navPill = LinearLayout(this).unclip().apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = solidCard(Color.argb(150, 0, 0, 0), 26, Color.argb(36, 255, 255, 255), 1)
+            setPadding(dp(18), dp(5), dp(12), dp(5))
+            isFocusable = true
+            isClickable = true
+            addView(navPillChev, LinearLayout.LayoutParams(dp(14), dp(18)))
+            addView(disc, LinearLayout.LayoutParams(dp(34), dp(34)).apply { marginStart = dp(6) })
+            addView(navPillLabel, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(10) })
+            setOnClickListener { openNavMenu(this) }
+            setOnFocusChangeListener { v, f ->
+                v.background = if (f) solidCard(Color.argb(210, 0, 0, 0), 26, Color.WHITE, 2)
+                else solidCard(Color.argb(150, 0, 0, 0), 26, Color.argb(36, 255, 255, 255), 1)
+                v.translationZ = if (f) dp(8).toFloat() else 0f
+                v.animate().scaleX(if (f) 1.06f else 1f).scaleY(if (f) 1.06f else 1f).setDuration(130).start()
             }
         }
+        updateNavPill()
+        return navPill
+    }
+
+    private fun navRow(kind: Int, label: String, current: Boolean, onClick: () -> Unit): View {
+        val g = GlyphView(this, kind).apply { setTint(Color.WHITE) }
+        val t = tv(15f, true, Color.WHITE).apply { text = label }
+        fun paint(f: Boolean, row: View) {
+            row.background = when {
+                f -> solidCard(Color.WHITE, 14)
+                current -> solidCard(Color.argb(38, 255, 255, 255), 14)
+                else -> null
+            }
+            val c = if (f) 0xFF0B0E16.toInt() else if (current) Color.WHITE else Color.argb(215, 255, 255, 255)
+            t.setTextColor(c)
+            g.setTint(c)
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), 0, dp(14), 0)
+            isFocusable = true
+            isClickable = true
+            if (kind >= 0) addView(g, LinearLayout.LayoutParams(dp(20), dp(20)))
+            addView(t, LinearLayout.LayoutParams(-2, -2).apply { marginStart = if (kind >= 0) dp(12) else dp(32) })
+            paint(false, this)
+            setOnClickListener { onClick() }
+            setOnFocusChangeListener { v, f -> paint(f, v) }
+        }
+    }
+
+    // قائمة التنقل: تنزل تحت الكبسولة. فوق التنقل الأساسي، وتحت إعدادات النظام
+    private fun openNavMenu(anchor: View) {
+        try { menuPopup?.dismiss() } catch (e: Throwable) { }
+        val popW = dp(250)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutDirection = View.LAYOUT_DIRECTION_RTL
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }
+        var pw: PopupWindow? = null
+        val rows = mutableListOf<View>()
+        fun add(kind: Int, label: String, current: Boolean, act: () -> Unit) {
+            val r = navRow(kind, label, current) { pw?.dismiss(); act() }
+            rows.add(r)
+            box.addView(r, LinearLayout.LayoutParams(-1, dp(44)).apply { bottomMargin = dp(2) })
+        }
+        add(3, "الرئيسية", currentPage == 0) { showPage(0) }
+        add(4, "المباريات", currentPage == 1) { showPage(1) }
+        add(5, "جميع التطبيقات", false) { showPage(0, false); openDrawer() }
+        add(0, "الواي فاي", false) { go(Intent(Settings.ACTION_WIFI_SETTINGS)) }
+        add(2, "المدينة · " + city().name, false) { openCityPicker() }
+        add(1, "الإعدادات", currentPage == 2) { showPage(2) }
+        box.addView(View(this).apply { setBackgroundColor(Color.argb(28, 255, 255, 255)) },
+            LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(6); bottomMargin = dp(6) })
+        add(-1, "إعدادات النظام", false) { go(Intent(Settings.ACTION_SETTINGS)) }
+        add(-1, "الصورة والشاشة", false) { go(Intent(Settings.ACTION_DISPLAY_SETTINGS)) }
+        add(-1, "الصوت", false) { go(Intent(Settings.ACTION_SOUND_SETTINGS)) }
+        add(-1, "التطبيقات الأخيرة", false) { showRecentApps() }
+        add(-1, "التحديث وحول الواجهة", false) { openSection(6) }
+
+        val loc = IntArray(2)
+        anchor.getLocationOnScreen(loc)
+        val sw = resources.displayMetrics.widthPixels
+        val y = loc[1] + anchor.height + dp(8)
+        val maxH = resources.displayMetrics.heightPixels - y - dp(16)
+        box.measure(View.MeasureSpec.makeMeasureSpec(popW, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        val frame = FrameLayout(this).apply {
+            background = solidCard(Color.argb(245, 22, 25, 34), 22, Color.argb(30, 255, 255, 255), 1)
+            addView(ScrollView(this@MainActivity).apply {
+                isVerticalScrollBarEnabled = false
+                addView(box)
+            }, FrameLayout.LayoutParams(-1, -1))
+        }
+        val popup = PopupWindow(frame, popW, minOf(box.measuredHeight + dp(2), maxH), true)
+        popup.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        popup.isOutsideTouchable = true
+        pw = popup
+        menuPopup = popup
+        val x = (loc[0] + anchor.width - popW).coerceIn(dp(12), maxOf(dp(12), sw - popW - dp(12)))
+        popup.showAtLocation(anchor, Gravity.TOP or Gravity.LEFT, x, y)
+        val first = rows.getOrNull(if (currentPage == 2) 5 else currentPage)
+        frame.post { first?.requestFocus() }
     }
 
     /* ─────────── الهيدر ─────────── */
@@ -990,41 +1349,16 @@ class MainActivity : Activity() {
         clockLine.addView(dateLineTv)
         rightCluster.addView(greetingTv)
         rightCluster.addView(clockLine)
+        clockCluster = rightCluster
+        h.addView(buildNavPill(), LinearLayout.LayoutParams(-2, dp(44)).apply {
+            gravity = Gravity.TOP
+            topMargin = dp(2)
+        })
+        h.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
         h.addView(rightCluster, LinearLayout.LayoutParams(-2, -2))
 
-        h.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f))
-
-        val names = listOf("الرئيسية", "المباريات")
-        val pList = mutableListOf<LinearLayout>()
-        val tList = mutableListOf<TextView>()
-
-        names.forEachIndexed { i, n ->
-            val txt = tv(13.5f, true, Color.WHITE).apply { text = n }
-            val pill = LinearLayout(this).unclip().apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
-                setPadding(dp(18), dp(9), dp(18), dp(9))
-                isFocusable = true
-                isClickable = true
-                outlineProvider = null
-                addView(txt)
-                setOnClickListener { showPage(i) }
-                setOnFocusChangeListener { v, f ->
-                    updateTabStyles()
-                    v.translationZ = if (f) dp(10).toFloat() else 0f
-                    v.animate().scaleX(if (f) 1.07f else 1f).scaleY(if (f) 1.07f else 1f).setDuration(130).start()
-                }
-            }
-            pList.add(pill)
-            tList.add(txt)
-            h.addView(pill, LinearLayout.LayoutParams(-2, dp(42)).apply { marginStart = dp(8) })
-        }
-        tabPills = pList
-        tabTexts = tList
-
-        h.addView(wifiCapsule(), LinearLayout.LayoutParams(-2, dp(42)).apply { marginStart = dp(10) })
-        h.addView(cityCapsule(), LinearLayout.LayoutParams(-2, dp(42)).apply { marginStart = dp(8) })
-        h.addView(actionCapsule("الإعدادات", 1) { openSettingsMenu(it) }, LinearLayout.LayoutParams(-2, dp(42)).apply { marginStart = dp(8) })
+        // اسم المدينة يتحدّث من setCity(): نحتفظ بالنص هنا، والعرض صار داخل قائمة التنقل
+        cityPillTv = tv(13f, true, Color.WHITE).apply { text = city().name }
 
         return h
     }
@@ -1050,79 +1384,48 @@ class MainActivity : Activity() {
         extra.animate().alpha(if (on) 1f else 0f).setDuration(if (on) 260 else 140).start()
     }
 
-    private fun capsuleFocus(v: View, f: Boolean, title: TextView?, glyph: GlyphView) {
-        v.background = if (f) focusBg(26) else slateGlass(185, 26, Color.argb(55, 255, 255, 255), 1)
-        title?.setTextColor(if (f) focusFg() else Color.WHITE)
-        glyph.setTint(if (f) focusFg() else Color.WHITE)
+    private fun paintCapsule(v: View, f: Boolean, sel: Boolean, title: TextView?, glyph: GlyphView) {
+        v.background = when {
+            f -> focusBg(26)
+            sel -> slateGlass(230, 26, accent, 1)
+            else -> slateGlass(185, 26, Color.argb(55, 255, 255, 255), 1)
+        }
+        val col = when {
+            f -> focusFg()
+            sel -> accent
+            else -> Color.WHITE
+        }
+        title?.setTextColor(col)
+        glyph.setTint(col)
+    }
+
+    private fun capsuleFocus(v: View, f: Boolean, sel: Boolean, title: TextView?, glyph: GlyphView) {
+        paintCapsule(v, f, sel, title, glyph)
         v.translationZ = if (f) dp(10).toFloat() else 0f
         v.animate().scaleX(if (f) 1.07f else 1f).scaleY(if (f) 1.07f else 1f).setDuration(130).start()
     }
 
-    private fun wifiCapsule(): View {
-        val glyph = GlyphView(this, 0)
-        val title = tv(13f, true, Color.WHITE).apply {
-            text = "Wi-Fi"
-            setSingleLine(true)
-            setPadding(dp(8), 0, dp(8), 0)
-        }
-        val badge = tv(10.5f, true, Color.WHITE).apply {
-            text = "متصل"
-            background = solidCard(greenBadge, 12)
-            setPadding(dp(8), dp(2), dp(8), dp(2))
-        }
-        val extra = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            clipChildren = true
-            alpha = 0f
-            addView(title)
-            addView(badge)
-        }
-        return LinearLayout(this).unclip().apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = slateGlass(185, 26, Color.argb(55, 255, 255, 255), 1)
-            setPadding(dp(10), dp(7), dp(10), dp(7))
-            isFocusable = true
-            isClickable = true
-            outlineProvider = null
-            addView(glyph, LinearLayout.LayoutParams(dp(22), dp(22)))
-            addView(extra, LinearLayout.LayoutParams(0, -2))
-            setOnClickListener { go(Intent(Settings.ACTION_WIFI_SETTINGS)) }
-            setOnFocusChangeListener { v, f ->
-                capsuleFocus(v, f, title, glyph)
-                setExpanded(extra, f)
-            }
-        }
-    }
+    private fun isOnline(): Boolean = try {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val n = cm.activeNetwork
+        val caps = if (n != null) cm.getNetworkCapabilities(n) else null
+        caps != null && caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    } catch (e: Throwable) { true }
 
-    private fun cityCapsule(): View {
-        val glyph = GlyphView(this, 2)
-        cityPillTv = tv(13f, true, Color.WHITE).apply {
-            text = city().name
-            setPadding(dp(6), 0, dp(4), 0)
-        }
-        return LinearLayout(this).unclip().apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = slateGlass(185, 26, Color.argb(55, 255, 255, 255), 1)
-            setPadding(dp(14), dp(7), dp(14), dp(7))
-            isFocusable = true
-            isClickable = true
-            outlineProvider = null
-            addView(glyph, LinearLayout.LayoutParams(dp(22), dp(22)))
-            addView(cityPillTv)
-            setOnClickListener { openCityPicker() }
-            setOnFocusChangeListener { v, f -> capsuleFocus(v, f, cityPillTv, glyph) }
-        }
-    }
-
-    private fun actionCapsule(label: String, kind: Int, onClick: (View) -> Unit): View {
+    // كبسولة أيقونة موحّدة: الأيقونة دايماً ظاهرة، والكتابة تنفتح بجنبها لما يجي عليها المؤشر
+    private fun iconCapsule(
+        kind: Int,
+        label: String,
+        badge: View? = null,
+        isSelected: () -> Boolean = { false },
+        onFocus: (() -> Unit)? = null,
+        onClick: (View) -> Unit
+    ): Triple<LinearLayout, GlyphView, TextView> {
         val glyph = GlyphView(this, kind)
         val title = tv(13f, true, Color.WHITE).apply {
             text = label
             setSingleLine(true)
-            setPadding(dp(8), 0, dp(4), 0)
+            setPadding(dp(8), 0, dp(6), 0)
         }
         val extra = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1130,8 +1433,9 @@ class MainActivity : Activity() {
             clipChildren = true
             alpha = 0f
             addView(title)
+            if (badge != null) addView(badge)
         }
-        return LinearLayout(this).unclip().apply {
+        val root = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = slateGlass(185, 26, Color.argb(55, 255, 255, 255), 1)
@@ -1143,10 +1447,12 @@ class MainActivity : Activity() {
             addView(extra, LinearLayout.LayoutParams(0, -2))
             setOnClickListener { onClick(this) }
             setOnFocusChangeListener { v, f ->
-                capsuleFocus(v, f, title, glyph)
+                if (f) onFocus?.invoke()
+                capsuleFocus(v, f, isSelected(), title, glyph)
                 setExpanded(extra, f)
             }
         }
+        return Triple(root, glyph, title)
     }
 
     /* ─────────── الصفحة الرئيسية ─────────── */
@@ -1183,7 +1489,8 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        tempRow.addView(sunView(), LinearLayout.LayoutParams(dp(34), dp(34)))
+        weatherIcon = WmWeatherIcon(this).also { it.setState(wCat, wDay) }
+        tempRow.addView(weatherIcon, LinearLayout.LayoutParams(dp(34), dp(34)))
         tempTv = tv(34f, true, Color.WHITE).apply {
             text = "--°"
             includeFontPadding = false
@@ -1374,7 +1681,8 @@ class MainActivity : Activity() {
 
     private fun openDrawer() {
         if (drawerOpen || !::drawerView.isInitialized) return
-        if (allGrid.childCount == 0) loadAppsAndDock()
+        if (allApps.isEmpty()) loadAppsAndDock()
+        ensureGrid()
         drawerOpen = true
         val h = (if (rootFrame.height > 0) rootFrame.height else resources.displayMetrics.heightPixels).toFloat()
         drawerScrim.animate().cancel()
@@ -1430,7 +1738,13 @@ class MainActivity : Activity() {
         }
     }
 
-    class GlyphView(c: Context, private val kind: Int) : View(c) {
+    class GlyphView(c: Context, private var kind: Int) : View(c) {
+        fun setKind(k: Int) {
+            if (k != kind) {
+                kind = k
+                invalidate()
+            }
+        }
         private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; strokeCap = Paint.Cap.ROUND }
         fun setTint(c: Int) {
             p.color = c
@@ -1467,7 +1781,7 @@ class MainActivity : Activity() {
                     path.addCircle(cx, cy, 3.4f * d, Path.Direction.CW)
                     cv.drawPath(path, p)
                 }
-                else -> {
+                2 -> {
                     p.style = Paint.Style.STROKE
                     p.strokeWidth = 2.0f * d
                     cv.drawCircle(cx, cy - 2.5f * d, 5f * d, p)
@@ -1476,27 +1790,111 @@ class MainActivity : Activity() {
                     p.style = Paint.Style.FILL
                     cv.drawCircle(cx, cy - 2.5f * d, 1.8f * d, p)
                 }
-            }
-        }
-    }
-
-    private fun sunView(): View = object : View(this) {
-        private val p = Paint(Paint.ANTI_ALIAS_FLAG)
-        override fun onDraw(c: Canvas) {
-            super.onDraw(c)
-            val cx = width / 2f
-            val cy = height / 2f
-            p.style = Paint.Style.FILL
-            p.color = Color.parseColor("#FFB703")
-            c.drawCircle(cx, cy, width * 0.28f, p)
-            p.style = Paint.Style.STROKE
-            p.strokeWidth = 2f
-            p.strokeCap = Paint.Cap.ROUND
-            for (i in 0 until 8) {
-                val a = Math.toRadians((i * 45).toDouble())
-                val r1 = width * 0.36f
-                val r2 = width * 0.46f
-                c.drawLine(cx + r1 * Math.cos(a).toFloat(), cy + r1 * Math.sin(a).toFloat(), cx + r2 * Math.cos(a).toFloat(), cy + r2 * Math.sin(a).toFloat(), p)
+                3 -> {
+                    p.style = Paint.Style.STROKE
+                    p.strokeWidth = 2.0f * d
+                    p.strokeJoin = Paint.Join.ROUND
+                    val roof = Path()
+                    roof.moveTo(cx - 9.5f * d, cy - 0.5f * d)
+                    roof.lineTo(cx, cy - 8.5f * d)
+                    roof.lineTo(cx + 9.5f * d, cy - 0.5f * d)
+                    cv.drawPath(roof, p)
+                    val body = Path()
+                    body.moveTo(cx - 6.5f * d, cy - 2.5f * d)
+                    body.lineTo(cx - 6.5f * d, cy + 8f * d)
+                    body.lineTo(cx + 6.5f * d, cy + 8f * d)
+                    body.lineTo(cx + 6.5f * d, cy - 2.5f * d)
+                    cv.drawPath(body, p)
+                    val door = Path()
+                    door.moveTo(cx - 2f * d, cy + 8f * d)
+                    door.lineTo(cx - 2f * d, cy + 3.2f * d)
+                    door.lineTo(cx + 2f * d, cy + 3.2f * d)
+                    door.lineTo(cx + 2f * d, cy + 8f * d)
+                    cv.drawPath(door, p)
+                }
+                4 -> {
+                    p.style = Paint.Style.STROKE
+                    p.strokeWidth = 1.9f * d
+                    cv.drawCircle(cx, cy, 9.6f * d, p)
+                    val pent = Path()
+                    for (k in 0 until 5) {
+                        val a = Math.toRadians((-90 + k * 72).toDouble())
+                        val x = cx + 3.6f * d * Math.cos(a).toFloat()
+                        val y = cy + 3.6f * d * Math.sin(a).toFloat()
+                        if (k == 0) pent.moveTo(x, y) else pent.lineTo(x, y)
+                        cv.drawLine(x, y, cx + 9.4f * d * Math.cos(a).toFloat(), cy + 9.4f * d * Math.sin(a).toFloat(), p)
+                    }
+                    pent.close()
+                    p.style = Paint.Style.FILL
+                    cv.drawPath(pent, p)
+                }
+                5 -> {   // شبكة التطبيقات
+                    p.style = Paint.Style.STROKE
+                    p.strokeWidth = 1.9f * d
+                    for (ox in listOf(-8.6f, 1.6f)) for (oy in listOf(-8.6f, 1.6f))
+                        cv.drawRoundRect(cx + ox * d, cy + oy * d, cx + (ox + 7f) * d, cy + (oy + 7f) * d, 1.8f * d, 1.8f * d, p)
+                }
+                6 -> {   // لوحة ألوان
+                    p.style = Paint.Style.STROKE
+                    p.strokeWidth = 1.9f * d
+                    cv.drawCircle(cx, cy, 9.4f * d, p)
+                    p.style = Paint.Style.FILL
+                    cv.drawCircle(cx - 4.2f * d, cy - 1.5f * d, 1.5f * d, p)
+                    cv.drawCircle(cx - 1f * d, cy - 5.2f * d, 1.5f * d, p)
+                    cv.drawCircle(cx + 3.8f * d, cy - 3.6f * d, 1.5f * d, p)
+                    cv.drawCircle(cx + 4.4f * d, cy + 3.2f * d, 2.3f * d, p)
+                }
+                7 -> {   // كرة أرضية
+                    p.style = Paint.Style.STROKE
+                    p.strokeWidth = 1.9f * d
+                    cv.drawCircle(cx, cy, 9.4f * d, p)
+                    cv.drawOval(cx - 4.2f * d, cy - 9.4f * d, cx + 4.2f * d, cy + 9.4f * d, p)
+                    cv.drawLine(cx - 9.4f * d, cy, cx + 9.4f * d, cy, p)
+                }
+                8 -> {   // ريموت
+                    p.style = Paint.Style.STROKE
+                    p.strokeWidth = 1.9f * d
+                    cv.drawRoundRect(cx - 4.8f * d, cy - 9.6f * d, cx + 4.8f * d, cy + 9.6f * d, 4.8f * d, 4.8f * d, p)
+                    p.style = Paint.Style.FILL
+                    cv.drawCircle(cx, cy - 4.6f * d, 1.7f * d, p)
+                    cv.drawCircle(cx, cy + 1.8f * d, 1.1f * d, p)
+                    cv.drawCircle(cx, cy + 5.4f * d, 1.1f * d, p)
+                }
+                9 -> {   // سحابة
+                    val a = Path()
+                    a.addCircle(cx - 4f * d, cy + 0.8f * d, 4.4f * d, Path.Direction.CW)
+                    val b = Path()
+                    b.addCircle(cx + 1.2f * d, cy - 2.4f * d, 5.4f * d, Path.Direction.CW)
+                    val c2 = Path()
+                    c2.addCircle(cx + 6f * d, cy + 1.6f * d, 3.6f * d, Path.Direction.CW)
+                    val r = Path()
+                    r.addRect(cx - 7.8f * d, cy + 0.8f * d, cx + 8.8f * d, cy + 5.2f * d, Path.Direction.CW)
+                    a.op(b, Path.Op.UNION)
+                    a.op(c2, Path.Op.UNION)
+                    a.op(r, Path.Op.UNION)
+                    p.style = Paint.Style.STROKE
+                    p.strokeWidth = 1.9f * d
+                    p.strokeJoin = Paint.Join.ROUND
+                    cv.drawPath(a, p)
+                }
+                10 -> {   // معلومات
+                    p.style = Paint.Style.STROKE
+                    p.strokeWidth = 1.9f * d
+                    cv.drawCircle(cx, cy, 9.4f * d, p)
+                    cv.drawLine(cx, cy - 0.5f * d, cx, cy + 5f * d, p)
+                    p.style = Paint.Style.FILL
+                    cv.drawCircle(cx, cy - 4.2f * d, 1.2f * d, p)
+                }
+                11 -> {  // سهم الرجوع (›)
+                    p.style = Paint.Style.STROKE
+                    p.strokeWidth = 2.3f * d
+                    p.strokeJoin = Paint.Join.ROUND
+                    val ch = Path()
+                    ch.moveTo(cx - 2.6f * d, cy - 5.4f * d)
+                    ch.lineTo(cx + 2.6f * d, cy)
+                    ch.lineTo(cx - 2.6f * d, cy + 5.4f * d)
+                    cv.drawPath(ch, p)
+                }
             }
         }
     }
@@ -1549,7 +1947,7 @@ class MainActivity : Activity() {
             "🖥️   الصورة والشاشة" to { go(Intent(Settings.ACTION_DISPLAY_SETTINGS)) },
             "🔊   الصوت" to { go(Intent(Settings.ACTION_SOUND_SETTINGS)) },
             "🧩   التطبيقات" to { showRecentApps() },
-            "🔄   التحديث وحول الواجهة" to { currentSection = 6; showPage(2) }
+            "🔄   التحديث وحول الواجهة" to { openSection(6) }
         )
         for ((label, act) in items) {
             box.addView(optionRow(label) { pw.dismiss(); act() }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
@@ -1877,7 +2275,7 @@ class MainActivity : Activity() {
     }
 
     // يقرأ آخر إصدار من GitHub مباشرة (رقم الإصدار = رقم البناء)
-    private fun checkUpdate(silent: Boolean = false) {
+    private fun checkUpdate(silent: Boolean = false, thenInstall: Boolean = false) {
         if (downloading) return
         if (!silent) setUpdateMsg("جاري التحقق...")
         ui.removeCallbacks(updateTask)
@@ -1909,6 +2307,7 @@ class MainActivity : Activity() {
                         if (!silent) setUpdateMsg("أنت على آخر إصدار ✓")
                     }
                     if (currentPage == 2 && currentSection == 6) refreshSection()
+                    if (thenInstall && updateInfo != null) startUpdate()
                 }
             } catch (e: Throwable) {
                 if (!silent) ui.post { setUpdateMsg("تعذر التحقق، تأكد من الاتصال بالإنترنت") }
@@ -1928,8 +2327,7 @@ class MainActivity : Activity() {
         })
         box.addView(optionRow("تحديث الآن") {
             dialog.dismiss()
-            currentSection = 6
-            showPage(2)
+            openSection(6)
             startUpdate()
         }, LinearLayout.LayoutParams(dp(340), -2).apply { bottomMargin = dp(8) })
         box.addView(optionRow("لاحقاً") { dialog.dismiss() }, LinearLayout.LayoutParams(dp(340), -2))
@@ -1945,6 +2343,7 @@ class MainActivity : Activity() {
         // أول مرة: نطلب إذن تثبيت التطبيقات، ونكمل التحديث تلقائياً لما يرجع
         if (Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
             resumeUpdate = true
+            putBool("resume_update", true)
             setUpdateMsg("فعّل «السماح» ثم ارجع بزر الرجوع، والتحديث يكمل لحاله")
             go(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
             return
@@ -2000,6 +2399,8 @@ class MainActivity : Activity() {
 
     @Suppress("DEPRECATION")
     private fun handleInstallResult(i: Intent) {
+        setIntent(Intent(Intent.ACTION_MAIN))   // ما نعيد معالجة نفس النتيجة لو انبنت الواجهة من جديد
+        if (::pages.isInitialized) openSection(6)
         when (i.getIntExtra(PackageInstaller.EXTRA_STATUS, -999)) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 val confirm = i.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
@@ -2021,62 +2422,76 @@ class MainActivity : Activity() {
         val root = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.HORIZONTAL
             layoutDirection = View.LAYOUT_DIRECTION_RTL
-            setPadding(dp(4), dp(8), dp(4), dp(8))
+            setPadding(dp(4), dp(4), dp(4), dp(8))
         }
 
-        // الشريط الجانبي
+        // الشريط الجانبي: بدون لوحة، والعنصر المحدد كبسولة بيضاء
         val side = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.VERTICAL
-            background = slateGlass(225, 26, Color.argb(45, 255, 255, 255), 1)
-            setPadding(dp(16), dp(18), dp(16), dp(18))
-            roundOutline(26)
+            setPadding(dp(6), dp(4), dp(14), dp(6))
         }
-        val brandTexts = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(tv(17f, true, Color.WHITE).apply { text = "WM Launcher" })
-            addView(tv(10.5f, false, muted).apply { text = "الإعدادات" })
-        }
-        val brand = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        brand.addView(WmLogo(this), LinearLayout.LayoutParams(dp(40), dp(40)))
-        brand.addView(brandTexts, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(12) })
-        side.addView(brand, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(16) })
+        side.addView(tv(30f, true, Color.WHITE).apply {
+            text = "الإعدادات"
+            setPadding(dp(8), 0, dp(8), 0)
+        }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(14) })
 
         val navList = mutableListOf<LinearLayout>()
         val labelList = mutableListOf<TextView>()
+        val glyphList = mutableListOf<GlyphView>()
         sectionNames.forEachIndexed { i, n ->
-            val ic = tv(15f).apply { text = sectionIcons[i] }
-            val label = tv(14f, true, Color.WHITE).apply { text = n }
+            val g = GlyphView(this, sectionGlyphs[i]).apply { setTint(Color.WHITE) }
+            val label = tv(15f, true, Color.WHITE).apply { text = n }
             val item = LinearLayout(this).unclip().apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(14), dp(10), dp(14), dp(10))
+                setPadding(dp(16), dp(10), dp(16), dp(10))
                 isFocusable = true
                 isClickable = true
-                roundOutline(16)
-                addView(ic)
-                addView(label, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(10) })
+                addView(g, LinearLayout.LayoutParams(dp(20), dp(20)))
+                addView(label, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(14) })
                 setOnClickListener {
+                    ui.removeCallbacks(navTask)
                     showSection(i)
                     settingsContent.getChildAt(0)?.requestFocus()
                 }
                 setOnFocusChangeListener { _, f ->
-                    if (f && (i != currentSection || settingsContent.childCount == 0)) showSection(i, true)
+                    if (f && (i != currentSection || settingsContent.childCount == 0)) {
+                        navTarget = i
+                        ui.removeCallbacks(navTask)
+                        ui.postDelayed(navTask, 60)
+                    }
                     styleNav()
                 }
             }
             navList.add(item)
             labelList.add(label)
-            side.addView(item, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
+            glyphList.add(g)
+            side.addView(item, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(4) })
         }
         settingsNav = navList
         settingsNavLabels = labelList
+        settingsNavGlyphs = glyphList
 
-        // المحتوى
-        settingsTitleTv = tv(22f, true, accent)
-        settingsSubTv = tv(12f, false, dim).apply { setPadding(0, dp(2), 0, dp(10)) }
+        // المحتوى: لوحة زجاجية كبيرة (أيقونة + عنوان + شرح + بطاقات ملخص + الصفوف)
+        settingsTitleTv = tv(26f, true, Color.WHITE)
+        settingsSubTv = tv(12.5f, false, dim)
+        settingsIconGlyph = GlyphView(this, sectionGlyphs[0]).apply { setTint(Color.WHITE) }
+        val iconDisc = FrameLayout(this).apply {
+            background = solidCard(Color.argb(26, 255, 255, 255), 26)
+            addView(settingsIconGlyph, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER))
+        }
+        val titles = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(settingsTitleTv)
+            addView(settingsSubTv)
+        }
+        val headRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(iconDisc, LinearLayout.LayoutParams(dp(52), dp(52)))
+            addView(titles, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(16) })
+        }
+        settingsSummary = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         settingsContent = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(4), 0, dp(24))
@@ -2085,47 +2500,100 @@ class MainActivity : Activity() {
             isVerticalScrollBarEnabled = false
             addView(settingsContent)
         }
-        val contentCol = LinearLayout(this).unclip().apply {
+        val panel = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(22), dp(6), dp(22), dp(6))
+            background = slateGlass(205, 28, Color.argb(36, 255, 255, 255), 1)
+            setPadding(dp(24), dp(18), dp(24), dp(6))
+            roundOutline(28)
         }
-        contentCol.addView(settingsTitleTv)
-        contentCol.addView(settingsSubTv)
-        contentCol.addView(settingsScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        panel.addView(headRow)
+        panel.addView(settingsSummary, LinearLayout.LayoutParams(-1, -2).apply {
+            topMargin = dp(14)
+            bottomMargin = dp(6)
+        })
+        panel.addView(settingsScroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        root.addView(side, LinearLayout.LayoutParams(dp(260), -1))
-        root.addView(contentCol, LinearLayout.LayoutParams(0, -1, 1f))
+        root.addView(side, LinearLayout.LayoutParams(dp(270), -1))
+        root.addView(panel, LinearLayout.LayoutParams(0, -1, 1f).apply { marginStart = dp(16) })
         showSection(currentSection)
         return root
     }
 
+    // بطاقات الملخص فوق الصفوف (اسم صغير + قيمة غامقة)
+    private fun renderSummary() {
+        if (!::settingsSummary.isInitialized) return
+        settingsSummary.removeAllViews()
+        fun on(k: String, d: Boolean) = if (pBool(k, d)) "مفعّل" else "متوقف"
+        val newVer = updateInfo?.let { it.code > curVersionCode() } == true
+        val cards: List<Pair<String, String>> = when (currentSection) {
+            0 -> listOf(
+                "لون الخلفية" to palettes[pInt("bg_palette", 0).coerceIn(0, palettes.size - 1)].first,
+                "لون التمييز" to accents[pInt("accent_idx", 0).coerceIn(0, accents.size - 1)].first,
+                "نمط التحديد" to (if (pInt("focus_style2", 1) == 0) "حاد (أبيض)" else "زجاجي متحرك"),
+                "نمط الحدود" to (if (pInt("border_style", 0) == 0) "زجاجي" else "حاد")
+            )
+            1 -> listOf(
+                "لغة التاريخ" to (if (pInt("date_lang", 0) == 0) "العربية" else "English"),
+                "شكل الأرقام" to listOf("كما هي", "هندية ٠١٢", "إنجليزية 012")[pInt("digits", 0).coerceIn(0, 2)],
+                "التحية" to on("show_greeting", true)
+            )
+            2 -> listOf("منع أزرار TV" to on("block_keys", true), "زر القائمة" to on("menu_key", true))
+            3 -> listOf("المدينة" to city().name, "الطقس" to on("show_weather", true), "الصلاة" to on("show_prayers", true))
+            4 -> listOf("المباريات" to on("show_matches", true), "الشريط المتحرك" to on("show_ticker", true), "البطولات المفعّلة" to nd("${enabledLeagues().size}"))
+            5 -> listOf(
+                "صفحة البداية" to (if (pInt("start_page", 0) == 0) "الرئيسية" else "المباريات"),
+                "أعمدة المفضلة" to listOf("4", "5", "6")[pInt("fav_cols", 1).coerceIn(0, 2)],
+                "درج التطبيقات" to on("show_all_apps", true)
+            )
+            else -> listOf("الإصدار" to nd(curVersionName()), "رقم البناء" to nd("${curVersionCode()}"), "التحديث" to (if (newVer) "متاح" else "محدّث"))
+        }
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        cards.forEachIndexed { k, (l, v) ->
+            val c = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = slateGlass(150, 16, Color.argb(28, 255, 255, 255), 1)
+                setPadding(dp(14), dp(8), dp(14), dp(9))
+                addView(tv(10.5f, false, dim).apply { text = l })
+                addView(tv(14.5f, true, Color.WHITE).apply {
+                    text = v
+                    setSingleLine(true)
+                })
+            }
+            row.addView(c, LinearLayout.LayoutParams(0, -2, 1f).apply { if (k > 0) marginStart = dp(10) })
+        }
+        settingsSummary.addView(row, LinearLayout.LayoutParams(-1, -2))
+    }
+
     private fun styleNav() {
-        if (!::settingsNav.isInitialized) return
+        if (!::settingsNav.isInitialized || !::settingsNavGlyphs.isInitialized) return
         settingsNav.forEachIndexed { k, item ->
             val f = item.hasFocus()
             val sel = k == currentSection
-            val lab = settingsNavLabels[k]
-            when {
-                f -> {
-                    item.background = focusBg(16)
-                    lab.setTextColor(focusFg())
-                }
-                sel -> {
-                    item.background = slateGlass(230, 16, accent, 1)
-                    lab.setTextColor(accent)
-                }
-                else -> {
-                    item.background = slateGlass(140, 16, Color.argb(30, 255, 255, 255), 1)
-                    lab.setTextColor(Color.WHITE)
-                }
+            val c = if (f) 0xFF0B0E16.toInt() else if (sel) Color.WHITE else Color.argb(185, 255, 255, 255)
+            item.background = when {
+                f -> solidCard(Color.WHITE, 16)
+                sel -> solidCard(Color.argb(34, 255, 255, 255), 16)
+                else -> null
             }
+            settingsNavLabels[k].setTextColor(c)
+            settingsNavGlyphs[k].setTint(c)
         }
+    }
+
+    // يفتح الإعدادات على قسم معيّن ويبني محتواه فعلياً (قبل كان القسم يتحدد بالقائمة والمحتوى يبقى على أول قسم)
+    private fun openSection(i: Int) {
+        if (!::settingsContent.isInitialized) return
+        ui.removeCallbacks(navTask)
+        showSection(i)
+        showPage(2)
     }
 
     private fun showSection(i: Int, animate: Boolean = false) {
         currentSection = i.coerceIn(0, sectionNames.size - 1)
         settingsTitleTv.text = sectionNames[currentSection]
         settingsSubTv.text = sectionSubs[currentSection]
+        if (::settingsIconGlyph.isInitialized) settingsIconGlyph.setKind(sectionGlyphs[currentSection])
+        renderSummary()
         openPicker = null
         settingsContent.layoutTransition = null
         settingsContent.removeAllViews()
@@ -2799,7 +3267,7 @@ class MainActivity : Activity() {
 
         val item = reorderList.removeAt(idx)
         reorderList.add(targetIdx, item)
-        prefs.edit().putString("fav_apps", reorderList.joinToString(",")).commit()
+        prefs.edit().putString("fav_apps", reorderList.joinToString(",")).apply()
 
         val neighborView = favRow.getChildAt(targetIdx) ?: return
         favRow.removeViewAt(targetIdx)
@@ -2811,25 +3279,97 @@ class MainActivity : Activity() {
         reorderingPkg = null
         reorderHintTv.visibility = View.GONE
         if (reorderList.isNotEmpty()) {
-            prefs.edit().putString("fav_apps", reorderList.joinToString(",")).commit()
+            prefs.edit().putString("fav_apps", reorderList.joinToString(",")).apply()
         }
         loadAppsAndDock(focusPkg = pkg)
         Toast.makeText(this, "تم تثبيت مكان التطبيق ✓", Toast.LENGTH_SHORT).show()
     }
 
-    private fun loadAppsAndDock(focusPkg: String? = null) {
+    // كاش للاسم والأيقونة واللون (الحساب الثقيل يصير مرة وحدة لكل تطبيق بدل كل مرة)
+    private class AppVis(val label: String, val icon: Drawable, val banner: Drawable?, val bg: Int, val glow: Int)
+    private val labelCache = ConcurrentHashMap<String, String>()
+    private val visCache = ConcurrentHashMap<String, AppVis>()
+    private var appsSig = ""
+    private var gridApps: List<ResolveInfo> = emptyList()
+    private var gridGen = 0
+
+    private fun appKey(app: ResolveInfo): String {
+        val ai = app.activityInfo
+        val stamp = try { java.io.File(ai.applicationInfo.sourceDir).lastModified() } catch (e: Throwable) { 0L }
+        return ai.packageName + "@" + stamp
+    }
+
+    private fun labelOf(app: ResolveInfo): String {
+        val k = appKey(app)
+        labelCache[k]?.let { return it }
+        val l = app.loadLabel(packageManager).toString()
+        labelCache[k] = l
+        return l
+    }
+
+    private fun visOf(app: ResolveInfo): AppVis {
+        val k = appKey(app)
+        visCache[k]?.let { return it }
         val pm = packageManager
-        allApps = (pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER), 0) +
+        val pkg = app.activityInfo.packageName
+        val label = labelOf(app)
+        val icon = app.loadIcon(pm)
+        val banner: Drawable? = try { app.activityInfo.loadBanner(pm) ?: app.activityInfo.applicationInfo.loadBanner(pm) } catch (e: Throwable) { null }
+        val bg = if (banner != null) 0xFF141822.toInt() else brandBg(label, pkg, icon)
+        val v = AppVis(label, icon, banner, bg, dominant(banner ?: icon))
+        visCache[k] = v
+        return v
+    }
+
+    // نسخة مستقلة من الأيقونة لكل خلية (الـ Drawable الواحد ما يصلح لأكثر من عرض)
+    private fun fresh(d: Drawable): Drawable = try { d.constantState?.newDrawable(resources)?.mutate() ?: d } catch (e: Throwable) { d }
+
+    private fun gridCellW(): Int {
+        val gc = gridCols()
+        return (resources.displayMetrics.widthPixels - dp(52) - dp(44) - dp(28) - gc * dp(20)) / gc
+    }
+
+    private fun startGridBuild() {
+        val gen = ++gridGen
+        allGrid.removeAllViews()
+        allGrid.columnCount = gridCols()
+        gridApps = allApps.toList()
+        ui.postDelayed({ fillGrid(gen, 8) }, 500)
+    }
+
+    // يبني خلايا الدرج على دفعات صغيرة في الخلفية، فيفتح الدرج جاهز وبدون تعليق
+    private fun fillGrid(gen: Int, batch: Int) {
+        if (gen != gridGen || !::allGrid.isInitialized) return
+        val gw = gridCellW()
+        val from = allGrid.childCount
+        val to = if (batch <= 0) gridApps.size else minOf(gridApps.size, from + batch)
+        for (k in from until to) {
+            allGrid.addView(createCell(gridApps[k], gw, false), GridLayout.LayoutParams().apply {
+                width = -2
+                height = -2
+                setMargins(dp(10), dp(10), dp(10), dp(10))
+            })
+        }
+        if (batch > 0 && to < gridApps.size) ui.postDelayed({ fillGrid(gen, batch) }, 16)
+    }
+
+    private fun ensureGrid() { fillGrid(gridGen, 0) }
+
+    private fun loadAppsAndDock(focusPkg: String? = null, force: Boolean = true) {
+        val pm = packageManager
+        val raw = (pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER), 0) +
                 pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0))
             .filter { it.activityInfo.packageName != packageName }
             .distinctBy { it.activityInfo.packageName }
-            .sortedBy { it.loadLabel(pm).toString() }
-            .toMutableList()
+        val sig = raw.joinToString(",") { appKey(it) } + "|" + (prefs.getString("fav_apps", "") ?: "") + "|" +
+            favCols() + "|" + gridCols() + "|" + (reorderingPkg ?: "")
+        if (!force && sig == appsSig && ::favRow.isInitialized && favRow.childCount > 0) return
+        appsSig = sig
+        allApps = raw.sortedBy { labelOf(it) }.toMutableList()
 
         val favPkgs = if (reorderingPkg != null) reorderList else getSavedFavs()
         val sw = resources.displayMetrics.widthPixels
         val fc = favCols()
-        val gc = gridCols()
 
         favRow.removeAllViews()
         val favList = favPkgs.mapNotNull { pkg -> allApps.find { it.activityInfo.packageName == pkg } }
@@ -2844,24 +3384,22 @@ class MainActivity : Activity() {
             favRow.addView(cell, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(16) })
         }
 
-        allGrid.removeAllViews()
-        allGrid.columnCount = gc
-        val gw = (sw - dp(52) - dp(44) - dp(28) - gc * dp(20)) / gc
         if (::drawerCountTv.isInitialized) drawerCountTv.text = nd("${allApps.size} تطبيق")
-        for (a in allApps) {
-            allGrid.addView(createCell(a, gw, isDock = false), GridLayout.LayoutParams().apply {
-                width = -2
-                height = -2
-                setMargins(dp(10), dp(10), dp(10), dp(10))
-            })
-        }
+        startGridBuild()
 
         if (drawerOpen) {
+            ensureGrid()
             val t = tileOf(allGrid, focusPkg) ?: tileOf(allGrid, lastDrawerPkg) ?: firstTile(allGrid)
             t?.post { t.requestFocus() }
         } else if (currentPage == 0) {
             val target = viewToFocus ?: tileOf(favRow, lastDockPkg) ?: firstTile(favRow)
             target?.post { target.requestFocus() }
+        }
+
+        // نجهّز الأيقونات والألوان في الخلفية عشان الدرج يفتح فوراً
+        val snapshot = allApps.toList()
+        thread {
+            for (a in snapshot) try { visOf(a) } catch (e: Throwable) { }
         }
     }
 
@@ -2908,13 +3446,13 @@ class MainActivity : Activity() {
     }
 
     private fun createCell(app: ResolveInfo, w: Int, isDock: Boolean): View {
-        val pm = packageManager
+        val vis = visOf(app)
         val pkg = app.activityInfo.packageName
-        val label = app.loadLabel(pm).toString()
-        val icon = app.loadIcon(pm)
-        val banner: Drawable? = try { app.activityInfo.loadBanner(pm) ?: app.activityInfo.applicationInfo.loadBanner(pm) } catch (e: Throwable) { null }
-        val bg = if (banner != null) 0xFF141822.toInt() else brandBg(label, pkg, icon)
-        val glowC = dominant(banner ?: icon)
+        val label = vis.label
+        val icon = vis.icon
+        val banner = vis.banner
+        val bg = vis.bg
+        val glowC = vis.glow
         val th = (w * 0.54f).toInt()
         val isMovingThis = isDock && (reorderingPkg == pkg)
 
@@ -2932,13 +3470,11 @@ class MainActivity : Activity() {
             setPadding(dp(4), dp(7), dp(4), 0)
         }
 
+        val idleB = solidCard(Color.TRANSPARENT, 20, Color.argb(45, 255, 255, 255), 1)
+        val focB = solidCard(Color.TRANSPARENT, 20, focusRing(), 3)
+        val movB = solidCard(Color.TRANSPARENT, 20, gold, 3)
         val borderOverlay = View(this).apply {
-            background = solidCard(
-                Color.TRANSPARENT,
-                20,
-                if (isMovingThis) accent else Color.argb(45, 255, 255, 255),
-                if (isMovingThis) 3 else 1
-            )
+            background = if (isMovingThis) solidCard(Color.TRANSPARENT, 20, accent, 3) else idleB
         }
 
         val tile = FrameLayout(this).unclip().apply {
@@ -2966,17 +3502,12 @@ class MainActivity : Activity() {
             setOnFocusChangeListener { v, f ->
                 if (f) { if (isDock) lastDockPkg = pkg else lastDrawerPkg = pkg }
                 val movingNow = isDock && (reorderingPkg == pkg)
-                borderOverlay.background = solidCard(
-                    Color.TRANSPARENT,
-                    20,
-                    when {
-                        movingNow -> gold
-                        f -> focusRing()
-                        else -> Color.argb(45, 255, 255, 255)
-                    },
-                    if (f || movingNow) 3 else 1
-                )
-                v.elevation = if (f || movingNow) 14f else 3f
+                borderOverlay.background = when {
+                    movingNow -> movB
+                    f -> focB
+                    else -> idleB
+                }
+                v.elevation = if (f || movingNow) 14f else 0f
                 cell.translationZ = if (f || movingNow) dp(12).toFloat() else 0f
                 titleTv.setTextColor(
                     when {
@@ -3010,13 +3541,13 @@ class MainActivity : Activity() {
 
         if (banner != null) {
             tile.addView(ImageView(this).apply {
-                setImageDrawable(banner)
+                setImageDrawable(fresh(banner))
                 scaleType = ImageView.ScaleType.CENTER_CROP
             }, FrameLayout.LayoutParams(-1, -1))
         } else {
             val isz = (th * 0.64f).toInt()
             tile.addView(ImageView(this).apply {
-                setImageDrawable(icon)
+                setImageDrawable(fresh(icon))
                 scaleType = ImageView.ScaleType.FIT_CENTER
             }, FrameLayout.LayoutParams(isz, isz, Gravity.CENTER))
         }
@@ -3034,7 +3565,7 @@ class MainActivity : Activity() {
         val inFav = favs.contains(pkg)
 
         fun save() {
-            prefs.edit().putString("fav_apps", favs.joinToString(",")).commit()
+            prefs.edit().putString("fav_apps", favs.joinToString(",")).apply()
             loadAppsAndDock(focusPkg = pkg)
         }
 
@@ -3089,6 +3620,7 @@ class MainActivity : Activity() {
     private fun applyWeather() {
         if (!::tempTv.isInitialized) return
         tempTv.text = nd(wTemp)
+        if (::weatherIcon.isInitialized) weatherIcon.setState(wCat, wDay)
         weatherStatusTv.text = wStatus
         weatherSubTv.text = nd(wSub)
     }
@@ -3104,6 +3636,8 @@ class MainActivity : Activity() {
                     if (Data.encode(c) != Data.encode(city())) return@post
                     wTemp = "${w.temp}°"
                     wStatus = "${w.status}"
+                    wCat = w.cat
+                    wDay = w.isDay
                     wSub = "المحسوسة ${w.feels}° • الرطوبة ${w.humidity}%\nالرياح ${w.wind} كم/س"
                     applyWeather()
                 }
