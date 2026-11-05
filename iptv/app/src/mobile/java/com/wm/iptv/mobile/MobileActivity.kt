@@ -107,6 +107,9 @@ private fun MRoot(nav: Navigator, onExit: () -> Unit) {
         }
     }
 
+    androidx.compose.runtime.LaunchedEffect(Unit) { com.wm.iptv.update.Updater.check(quiet = true) }
+    MUpdateDialog()
+
     var lastBack by remember { mutableLongStateOf(0L) }
     BackHandler {
         if (!nav.back()) {

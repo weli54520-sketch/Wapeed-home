@@ -38,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -267,3 +268,53 @@ fun Modifier.plainClick(onClick: () -> Unit): Modifier =
 
 /** المساحة اللي ياخذها الشريط العائم تحت (القوائم تضيفها كـ padding) */
 val LocalBarSpace = androidx.compose.runtime.staticCompositionLocalOf { 0.dp }
+
+/** نافذة التحديث (نسخة الجوال) */
+@Composable
+fun MUpdateDialog() {
+    val state by com.wm.iptv.update.Updater.state.collectAsState()
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val s = state
+    val show = when (s) {
+        is com.wm.iptv.update.UpdateState.Available -> s.version != com.wm.iptv.update.Updater.dismissedVersion
+        is com.wm.iptv.update.UpdateState.Downloading, com.wm.iptv.update.UpdateState.Installing, is com.wm.iptv.update.UpdateState.Error -> true
+        else -> false
+    }
+    if (!show) return
+    val U = com.wm.iptv.update.Updater
+    androidx.compose.ui.window.Dialog(onDismissRequest = {
+        if (s is com.wm.iptv.update.UpdateState.Available) { U.dismissedVersion = s.version; U.reset() }
+        if (s is com.wm.iptv.update.UpdateState.Error) U.reset()
+    }) {
+        com.wm.iptv.ui.AppTheme(scaleToTv = false) {
+            Column(Modifier.fillMaxWidth().background(C.Panel, RoundedCornerShape(22.dp)).padding(22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                when (s) {
+                    is com.wm.iptv.update.UpdateState.Available -> {
+                        Text("تحديث جديد متوفر", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Text("الإصدار 1.${s.version} — أنت على 1.${U.currentVersion}", fontSize = 14.sp, color = C.Text3)
+                        Text("ينزل فوق النسخة الحالية، وبياناتك تبقى.", fontSize = 13.sp, color = C.Muted)
+                        Spacer(Modifier.height(4.dp))
+                        MBigButton("تحديث الآن", com.wm.iptv.ui.Ico.Refresh) { com.wm.iptv.update.startUpdate(ctx, scope, s) }
+                        MBigButton("لاحقاً", null, primary = false) { U.dismissedVersion = s.version; U.reset() }
+                    }
+                    is com.wm.iptv.update.UpdateState.Downloading -> {
+                        Text("جارٍ تنزيل التحديث…", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        ProgressLine(s.percent / 100f, height = 5.dp)
+                        Text("${s.percent}٪", fontSize = 13.sp, color = C.Text3)
+                    }
+                    com.wm.iptv.update.UpdateState.Installing -> {
+                        Text("جارٍ التثبيت…", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Text("وافق على نافذة التثبيت لو طلعت لك.", fontSize = 13.sp, color = C.Text3)
+                    }
+                    is com.wm.iptv.update.UpdateState.Error -> {
+                        Text("ما تم التحديث", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Text(s.message, fontSize = 13.sp, color = C.Text3)
+                        MBigButton("حسناً", null) { U.reset() }
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+}

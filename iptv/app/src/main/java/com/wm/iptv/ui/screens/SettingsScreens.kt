@@ -59,6 +59,7 @@ fun SettingsScreen(nav: Navigator) {
     val account by Repo.account.collectAsState()
     val catalog by Repo.catalog.collectAsState()
     val ctx = LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val mem = rememberFocusMemory("settings")
     val st = Repo.store
     var tick by remember { mutableIntStateOf(0) } // يحدث القيم بعد كل تغيير
@@ -145,6 +146,14 @@ fun SettingsScreen(nav: Navigator) {
                 item { SideItem("إخفاء تصنيفات القنوات", Modifier.track(mem, "hl"), icon = Ico.EyeOff, onClick = { nav.go(Route.HiddenCats(Kind.LIVE)) }) }
                 item { SideItem("إخفاء تصنيفات الأفلام", Modifier.track(mem, "hm"), icon = Ico.EyeOff, onClick = { nav.go(Route.HiddenCats(Kind.MOVIE)) }) }
                 item { SideItem("إخفاء تصنيفات المسلسلات", Modifier.track(mem, "hs"), icon = Ico.EyeOff, onClick = { nav.go(Route.HiddenCats(Kind.SERIES)) }) }
+
+                item { Header("التطبيق") }
+                item {
+                    val upd by com.wm.iptv.update.Updater.state.collectAsState()
+                    SideItem("التحقق من التحديثات", Modifier.track(mem, "update"), icon = Ico.Refresh,
+                        trailing = if (upd is com.wm.iptv.update.UpdateState.Checking) "جارٍ الفحص…" else "الإصدار الحالي 1.${com.wm.iptv.update.Updater.currentVersion}",
+                        onClick = { com.wm.iptv.update.manualCheck(ctx, scope) })
+                }
 
                 item { Header("السجل") }
                 item {

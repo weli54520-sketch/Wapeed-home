@@ -100,6 +100,10 @@ private fun Root(nav: Navigator, onExit: () -> Unit) {
         }
     }
 
+    // يشيك على التحديثات بهدوء أول ما يفتح التطبيق
+    LaunchedEffect(Unit) { com.wm.iptv.update.Updater.check(quiet = true) }
+    com.wm.iptv.ui.TvUpdateDialog()
+
     var lastBack by remember { androidx.compose.runtime.mutableLongStateOf(0L) }
     BackHandler {
         if (!nav.back()) {

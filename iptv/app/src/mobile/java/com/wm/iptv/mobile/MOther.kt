@@ -177,6 +177,7 @@ fun MSettingsScreen(nav: Navigator) {
     val catalog by Repo.catalog.collectAsState()
     val ctx = LocalContext.current
     val st = Repo.store
+    val scope = rememberCoroutineScope()
     var tick by remember { mutableIntStateOf(0) }
     val info = remember(version) { st.userInfo() }
 
@@ -210,6 +211,14 @@ fun MSettingsScreen(nav: Navigator) {
         item { MRow("إخفاء تصنيفات القنوات", icon = Ico.EyeOff) { nav.go(Route.HiddenCats(Kind.LIVE)) } }
         item { MRow("إخفاء تصنيفات الأفلام", icon = Ico.EyeOff) { nav.go(Route.HiddenCats(Kind.MOVIE)) } }
         item { MRow("إخفاء تصنيفات المسلسلات", icon = Ico.EyeOff) { nav.go(Route.HiddenCats(Kind.SERIES)) } }
+
+        item { MGroup("التطبيق") }
+        item {
+            val upd by com.wm.iptv.update.Updater.state.collectAsState()
+            MRow("التحقق من التحديثات", if (upd is com.wm.iptv.update.UpdateState.Checking) "جارٍ الفحص…" else "1.${com.wm.iptv.update.Updater.currentVersion}", Ico.Refresh) {
+                com.wm.iptv.update.manualCheck(ctx, scope)
+            }
+        }
 
         item { MGroup("السجل") }
         item { MRow("مسح سجل المشاهدة", icon = Ico.Trash) { st.clearHistory(); Repo.bump(); Toast.makeText(ctx, "انمسح السجل", Toast.LENGTH_SHORT).show() } }
