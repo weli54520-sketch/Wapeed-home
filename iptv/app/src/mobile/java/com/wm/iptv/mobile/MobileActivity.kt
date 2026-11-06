@@ -1,6 +1,27 @@
 package com.wm.iptv.mobile
 
 import android.os.Bundle
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
+import kotlin.math.roundToInt
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -139,8 +160,24 @@ private fun MMain(nav: Navigator) {
     val route = nav.top
     val state by Repo.state.collectAsState()
     val showBar = route.isTab
-    Box(Modifier.fillMaxSize()) {
-        CompositionLocalProvider(LocalBarSpace provides if (showBar) 96.dp else 0.dp) {
+    val mode = Repo.store.barMode
+    // الشريط: يختفي لما تنزل بالقائمة ويرجع لما تطلع (أو دايماً ظاهر / مخفي حسب الإعدادات)
+    var barVisible by remember { mutableStateOf(true) }
+    val modeNow = rememberUpdatedState(mode)
+    LaunchedEffect(route, mode) { barVisible = mode != 2 }
+    val barShown = showBar && (mode == 1 || barVisible)
+    val scrollConn = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (modeNow.value != 1) {
+                    if (available.y < -8f) barVisible = false else if (available.y > 8f) barVisible = true
+                }
+                return Offset.Zero
+            }
+        }
+    }
+    Box(Modifier.fillMaxSize().nestedScroll(scrollConn)) {
+        CompositionLocalProvider(LocalBarSpace provides if (showBar && mode != 2) 96.dp else 0.dp) {
             AnimatedContent(
                 targetState = route,
                 // انتقال سريع: الصفحة القديمة تختفي بسرعة عشان ما ترسم صفحتين ثقيلة مع بعض
@@ -174,10 +211,16 @@ private fun MMain(nav: Navigator) {
         }
         // الشريط العائم
         androidx.compose.animation.AnimatedVisibility(
-            showBar, modifier = Modifier.align(Alignment.BottomCenter),
+            barShown, modifier = Modifier.align(Alignment.BottomCenter),
             enter = androidx.compose.animation.slideInVertically { it } + fadeIn(),
             exit = androidx.compose.animation.slideOutVertically { it } + fadeOut(),
         ) { FloatingBar(nav, route) }
+        // شريط مخفي: اسحب من أسفل الشاشة لفوق (أو اضغطه) يطلع
+        if (showBar && !barShown) {
+            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(28.dp)
+                .pointerInput(Unit) { detectVerticalDragGestures { _, dy -> if (dy < -3f) barVisible = true } }
+                .plainClick { barVisible = true })
+        }
     }
 }
 
@@ -191,39 +234,92 @@ private val tabs = listOf(
     TabDef(Route.Search, "بحث", Ico.Search),
 )
 
-/** شريط عائم بستايل زجاجي: كبسولة فوق المحتوى، والتحديد فقاعة تتحرك بنعومة */
+/**
+ * شريط عائم بستايل زجاجي مثل الآيفون:
+ * - الفقاعة تتحرك بنعومة بين الأقسام، وتقدر تمسكها وتسحبها بإصبعك على الكبسولة
+ * - تنتقل للقسم لما ترفع إصبعك، والضغطة العادية على أي قسم تشتغل برضو
+ */
 @Composable
 private fun FloatingBar(nav: Navigator, current: Route) {
     val index = tabs.indexOfFirst { it.route == current || (current == Route.Settings && it.route == Route.Home) }.coerceAtLeast(0)
     val shape = RoundedCornerShape(999.dp)
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val density = LocalDensity.current
+    val haptic = LocalHapticFeedback.current
+    var dragging by remember { mutableStateOf(false) }
+    var dragPx by remember { mutableFloatStateOf(0f) }
+    var releasedFrom by remember { mutableStateOf<Float?>(null) }
+    val bubbleX = remember { Animatable(0f) }
+    val press by animateFloatAsState(if (dragging) 1f else 0f, spring(dampingRatio = 0.7f, stiffness = 500f), label = "press")
+
     Box(Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp).fillMaxWidth()) {
         BoxWithConstraints(
             Modifier.fillMaxWidth().height(66.dp)
-                .shadow(28.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
+                .graphicsLayer { scaleX = 1f + 0.02f * press; scaleY = 1f + 0.05f * press }
+                .shadow(20.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
                 .clip(shape)
-                .background(Brush.verticalGradient(listOf(Color(0xE62C2C30), Color(0xF01A1A1D))))
-                .border(0.8.dp, Brush.verticalGradient(listOf(Color(0x59FFFFFF), Color(0x0DFFFFFF))), shape)
+                // زجاج: طبقة غامقة شفافة + لمعة بيضاء من فوق + إطار رفيع لامع
+                .background(Color(0x4D0C0C10))
+                .background(Brush.verticalGradient(listOf(Color(0x4DFFFFFF), Color(0x0DFFFFFF))))
+                .border(0.8.dp, Brush.verticalGradient(listOf(Color(0x8CFFFFFF), Color(0x1AFFFFFF))), shape)
                 .padding(5.dp)
         ) {
             val itemW = maxWidth / tabs.size
-            val x by animateDpAsState(itemW * index, spring(dampingRatio = 0.78f, stiffness = 420f), label = "tab")
-            // فقاعة التحديد
+            val wpx = with(density) { itemW.toPx() }
+            val maxPx = wpx * (tabs.size - 1)
+            val bubblePx = if (dragging) dragPx else bubbleX.value
+            val shownIndex = if (dragging && wpx > 0f) (dragPx / wpx).roundToInt().coerceIn(0, tabs.size - 1) else index
+
+            // الفقاعة ترجع/تروح للقسم الحالي بنعومة (ومن مكان ما تركتها لو كنت تسحب)
+            LaunchedEffect(index, wpx, dragging) {
+                if (dragging || wpx <= 0f) return@LaunchedEffect
+                releasedFrom?.let { bubbleX.snapTo(it); releasedFrom = null }
+                bubbleX.animateTo(index * wpx, spring(dampingRatio = 0.78f, stiffness = 420f))
+            }
+            // اهتزاز خفيف كل ما تعدي على قسم أثناء السحب
+            LaunchedEffect(shownIndex) { if (dragging) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
+
+            fun finishDrag() {
+                if (!dragging) return
+                val target = (dragPx / wpx).roundToInt().coerceIn(0, tabs.size - 1)
+                releasedFrom = dragPx
+                dragging = false
+                val r = tabs[target].route
+                if (r != current) nav.go(r)
+            }
+
             Box(
-                Modifier.offset(x = x).width(itemW).fillMaxHeight().clip(shape)
-                    .background(Brush.verticalGradient(listOf(Color(0x40FFFFFF), Color(0x1FFFFFFF))))
-                    .border(0.6.dp, Color(0x33FFFFFF), shape)
-            )
-            Row(Modifier.fillMaxSize()) {
-                tabs.forEachIndexed { i, t ->
-                    val sel = i == index
-                    val color by animateColorAsState(if (sel) Color.White else Color(0xFF9A9AA0), label = "c")
-                    Column(
-                        Modifier.weight(1f).fillMaxHeight().clip(shape).plainClick { nav.go(t.route) },
-                        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(t.icon, t.label, tint = color, modifier = Modifier.size(21.dp))
-                        Spacer(Modifier.height(3.dp))
-                        Text(t.label, fontSize = 10.sp, color = color, fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium, maxLines = 1)
+                Modifier.fillMaxSize().pointerInput(wpx, rtl) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { dragPx = bubbleX.value; dragging = true },
+                        onDragEnd = { finishDrag() },
+                        onDragCancel = { finishDrag() },
+                    ) { change, dx ->
+                        change.consume()
+                        dragPx = (dragPx + (if (rtl) -dx else dx)).coerceIn(0f, maxPx)
+                    }
+                }
+            ) {
+                // فقاعة التحديد (زجاجية، وتكبر شوي وأنت ماسكها)
+                Box(
+                    Modifier.offset { IntOffset(bubblePx.roundToInt(), 0) }.width(itemW).fillMaxHeight()
+                        .graphicsLayer { scaleX = 1f + 0.12f * press; scaleY = 1f + 0.1f * press }
+                        .clip(shape)
+                        .background(Brush.verticalGradient(listOf(Color(0x73FFFFFF), Color(0x2EFFFFFF))))
+                        .border(0.8.dp, Brush.verticalGradient(listOf(Color(0xA6FFFFFF), Color(0x33FFFFFF))), shape)
+                )
+                Row(Modifier.fillMaxSize()) {
+                    tabs.forEachIndexed { i, t ->
+                        val sel = i == shownIndex
+                        val color by animateColorAsState(if (sel) Color.White else Color(0xFFC4C4CA), label = "c")
+                        Column(
+                            Modifier.weight(1f).fillMaxHeight().clip(shape).plainClick { nav.go(t.route) },
+                            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(t.icon, t.label, tint = color, modifier = Modifier.size(21.dp))
+                            Spacer(Modifier.height(3.dp))
+                            Text(t.label, fontSize = 10.sp, color = color, fontWeight = if (sel) FontWeight.Bold else FontWeight.Medium, maxLines = 1)
+                        }
                     }
                 }
             }

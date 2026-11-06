@@ -195,6 +195,11 @@ class Store(context: Context) {
         get() = prefs.getInt("live_split", 0)
         set(v) { prefs.edit().putInt("live_split", v).apply() }
 
+    /** الشريط السفلي (جوال): 0 يختفي مع التمرير — 1 دايماً ظاهر — 2 مخفي (يظهر بسحبة من أسفل الشاشة) */
+    var barMode: Int
+        get() = prefs.getInt("bar_mode", 0)
+        set(v) { prefs.edit().putInt("bar_mode", v).apply() }
+
     var autoNextEpisode: Boolean
         get() = prefs.getBoolean("auto_next", true)
         set(v) { prefs.edit().putBoolean("auto_next", v).apply() }
