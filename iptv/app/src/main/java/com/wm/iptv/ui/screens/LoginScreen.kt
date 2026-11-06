@@ -91,7 +91,7 @@ fun LoginScreen(onDone: () -> Unit, onCancel: (() -> Unit)? = null) {
         Column(Modifier.width(620.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(vertical = 36.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.Bottom) {
-                Text("WM", fontSize = 40.sp, fontWeight = FontWeight.Bold)
+                Text("Waleed TV", fontSize = 40.sp, fontWeight = FontWeight.Bold)
             }
             Text("أدخل بيانات اشتراك Xtream (اللي عطاك إياها المزود)", fontSize = 16.sp, color = C.Text3)
             Spacer(Modifier.height(6.dp))

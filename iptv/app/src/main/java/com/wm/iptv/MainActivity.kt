@@ -118,7 +118,7 @@ private fun Root(nav: Navigator, onExit: () -> Unit) {
 @Composable
 private fun LoadingScreen(step: String) {
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Text("WM", fontSize = 40.sp, fontWeight = FontWeight.Bold)
+        Text("Waleed TV", fontSize = 40.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(28.dp))
         CircularProgressIndicator(color = C.Text, strokeWidth = 3.dp)
         Spacer(Modifier.height(20.dp))
@@ -180,7 +180,7 @@ fun TopBar(
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(15_000) } }
     Row(modifier.fillMaxWidth().padding(horizontal = 48.dp, vertical = 24.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("WM", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text("Waleed TV", fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.weight(1f))
         Row(
             Modifier.background(Color(0x14FFFFFF), RoundedCornerShape(999.dp)).padding(5.dp),

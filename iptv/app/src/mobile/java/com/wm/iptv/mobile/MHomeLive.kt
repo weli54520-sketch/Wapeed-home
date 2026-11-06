@@ -109,7 +109,7 @@ fun MHomeScreen(nav: Navigator) {
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp + LocalBarSpace.current)) {
         item {
-            MHeader("WM") { MRefreshButton(); MIconButton(Ico.Gear, "الإعدادات") { nav.go(Route.Settings) } }
+            MHeader("Waleed TV") { MRefreshButton(); MIconButton(Ico.Gear, "الإعدادات") { nav.go(Route.Settings) } }
         }
         if (expiry != null) item {
             Text(expiry, color = C.Star, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 18.dp))

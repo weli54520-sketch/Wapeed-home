@@ -123,7 +123,7 @@ private fun MRoot(nav: Navigator, onExit: () -> Unit) {
 @Composable
 private fun MLoading(step: String) {
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Text("WM", fontSize = 40.sp, fontWeight = FontWeight.Bold)
+        Text("Waleed TV", fontSize = 40.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(24.dp))
         CircularProgressIndicator(color = C.Text, strokeWidth = 3.dp)
         Spacer(Modifier.height(18.dp))

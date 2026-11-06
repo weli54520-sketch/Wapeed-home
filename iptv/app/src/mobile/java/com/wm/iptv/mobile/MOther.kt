@@ -320,7 +320,7 @@ fun MLoginScreen(onDone: () -> Unit, onCancel: (() -> Unit)? = null) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Spacer(Modifier.height(20.dp))
         Row(verticalAlignment = Alignment.Bottom) {
-            Text("WM", fontSize = 36.sp, fontWeight = FontWeight.Bold)
+            Text("Waleed TV", fontSize = 36.sp, fontWeight = FontWeight.Bold)
         }
         Text("أدخل بيانات اشتراك Xtream", fontSize = 15.sp, color = C.Text3)
         Spacer(Modifier.height(4.dp))

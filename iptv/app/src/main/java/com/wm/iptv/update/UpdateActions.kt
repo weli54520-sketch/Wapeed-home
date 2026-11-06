@@ -10,8 +10,8 @@ fun startUpdate(ctx: Context, scope: CoroutineScope, a: UpdateState.Available) {
     if (!Updater.canInstall(ctx)) {
         val opened = Updater.openInstallPermission(ctx)
         Toast.makeText(ctx,
-            if (opened) "فعّل \"السماح من هذا المصدر\" لـ WM، وارجع اضغط تحديث"
-            else "فعّل تثبيت التطبيقات غير المعروفة لـ WM من إعدادات الجهاز (الأمان)",
+            if (opened) "فعّل \"السماح من هذا المصدر\" لـ Waleed TV، وارجع اضغط تحديث"
+            else "فعّل تثبيت التطبيقات غير المعروفة لـ Waleed TV من إعدادات الجهاز (الأمان)",
             Toast.LENGTH_LONG).show()
         return
     }
