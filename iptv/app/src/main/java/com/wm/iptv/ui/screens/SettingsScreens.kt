@@ -112,6 +112,8 @@ fun SettingsScreen(nav: Navigator) {
                     @Suppress("UNUSED_VARIABLE") val t = tick
                     SideItem("تشغيل الحلقة التالية تلقائياً", Modifier.track(mem, "auto"), trailing = if (st.autoNextEpisode) "تشغيل" else "إيقاف",
                         onClick = { st.autoNextEpisode = !st.autoNextEpisode; changed() })
+                    SideItem("تفاصيل الأفلام والمسلسلات بالعربي", Modifier.track(mem, "arabic"), trailing = if (st.arabicDetails) "تشغيل" else "إيقاف",
+                        onClick = { st.arabicDetails = !st.arabicDetails; Repo.clearDetailsCache(); changed() })
                 }
                 item(key = "audio") {
                     @Suppress("UNUSED_VARIABLE") val t = tick

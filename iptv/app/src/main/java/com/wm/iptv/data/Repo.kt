@@ -221,16 +221,26 @@ object Repo {
     suspend fun vodInfo(id: Int): VodInfo? {
         vodCache[id]?.let { return it }
         return try {
-            withContext(Dispatchers.IO) { api().vodInfo(id) }.also { vodCache[id] = it }
+            withContext(Dispatchers.IO) { arabic(api().vodInfo(id)) }.also { vodCache[id] = it }
         } catch (_: Exception) { null }
     }
 
     suspend fun seriesInfo(id: Int): SeriesInfo? {
         seriesCache[id]?.let { return it }
         return try {
-            withContext(Dispatchers.IO) { api().seriesInfo(id) }.also { seriesCache[id] = it }
+            withContext(Dispatchers.IO) { arabic(api().seriesInfo(id)) }.also { seriesCache[id] = it }
         } catch (_: Exception) { null }
     }
+
+    /** الوصف والتصنيف بالعربي (لو الخيار مفعّل) */
+    private fun arabic(v: VodInfo): VodInfo =
+        if (!store.arabicDetails) v else v.copy(plot = Translate.toArabic(v.plot), genre = Translate.genre(v.genre))
+
+    private fun arabic(s: SeriesInfo): SeriesInfo =
+        if (!store.arabicDetails) s else s.copy(plot = Translate.toArabic(s.plot), genre = Translate.genre(s.genre))
+
+    /** لما يتغير خيار الترجمة نمسح الكاش عشان التفاصيل تنجاب من جديد */
+    fun clearDetailsCache() { vodCache.clear(); seriesCache.clear() }
 
     fun cachedSeriesInfo(id: Int): SeriesInfo? = seriesCache[id]
 

@@ -177,8 +177,8 @@ fun MSection(title: String, content: LazyListScope.() -> Unit) {
 
 /** صف حبوب أفقي (تصنيفات / اختيارات) */
 @Composable
-fun MChips(items: List<Pair<String, String>>, selected: String, onPick: (String) -> Unit) {
-    LazyRow(contentPadding = PaddingValues(horizontal = 18.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+fun MChips(items: List<Pair<String, String>>, selected: String, modifier: Modifier = Modifier, onPick: (String) -> Unit) {
+    LazyRow(modifier, contentPadding = PaddingValues(horizontal = 18.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items(items, key = { it.first }) { (k, label) -> MPill(label, selected = k == selected, onClick = { onPick(k) }) }
     }
 }

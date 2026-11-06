@@ -32,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -62,6 +63,9 @@ import com.wm.iptv.ui.Route
 import com.wm.iptv.ui.formatDuration
 import com.wm.iptv.ui.formatTime
 import com.wm.iptv.ui.remainingText
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 private data class MItem(val id: Int, val name: String, val image: String, val rating: String, val added: Long, val cat: String, val key: String)
 
@@ -76,36 +80,29 @@ fun MBrowseScreen(nav: Navigator, kind: Kind) {
 
     var selection by rememberSaveable { mutableStateOf("all") }
     var sort by rememberSaveable { mutableStateOf(0) }
-    var query by rememberSaveable { mutableStateOf("") }
-    var searching by rememberSaveable { mutableStateOf(false) }
+    // البحث يبدأ مقفل دايماً: ما ينفتح لحاله (ولا يطلع الكيبورد) كل ما تدخل القسم
+    var query by remember { mutableStateOf("") }
+    var searching by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf(false) }
 
     val cats = remember(catalog, version) { Repo.visibleCategories(kind) }
-    val all = remember(catalog) {
-        if (isMovie) catalog.movies.map { MItem(it.id, it.name, it.icon, it.rating, it.added, it.categoryId, it.key) }
-        else catalog.series.map { MItem(it.id, it.name, it.cover, it.rating, it.updated, it.categoryId, it.key) }
-    }
+
     val favs = remember(version) { Repo.store.favorites(kind) }
     val hidden = remember(version) { Repo.store.hiddenCategories(kind) }
     val prog = remember(version) { if (isMovie) Repo.store.allProgress().associateBy { it.key } else emptyMap() }
 
-    val list = remember(all, selection, sort, query, favs, hidden) {
-        val base = when {
-            selection == "all" -> all.filter { it.cat !in hidden }
-            selection == "recent" -> all.filter { it.cat !in hidden }.sortedByDescending { it.added }.take(300)
-            selection == "fav" -> { val byId = all.associateBy { it.id }; Repo.store.favoriteOrder(kind).mapNotNull { byId[it] } }
-            selection.startsWith("c:") -> all.filter { it.cat == selection.removePrefix("c:") }
-            else -> all
-        }
-        val q = TextNorm.key(query)
-        val f = if (q.isEmpty()) base else base.filter { TextNorm.matches(it.key, q) }
-        if (selection == "recent" || selection == "fav") f
-        else when (sort) {
-            1 -> f.sortedBy { it.name.lowercase() }
-            2 -> f.sortedByDescending { it.rating.toDoubleOrNull() ?: 0.0 }
-            else -> f.sortedByDescending { it.added }
-        }
+    // الفلترة والترتيب في خيط خلفي (آلاف العناصر) عشان التنقل يكون ناعم، ونحفظ آخر نتيجة
+    // عشان لما ترجع من صفحة التفاصيل تطلع القائمة على طول بدون ما تنحسب من جديد
+    val cacheKey = "$kind|$selection|$sort|$query|${favs.hashCode()}|${hidden.hashCode()}"
+    val computed by produceState(BrowseCache.get(catalog, cacheKey), catalog, cacheKey) {
+        BrowseCache.get(catalog, cacheKey)?.let { value = it; return@produceState }
+        if (query.isNotEmpty()) delay(150)
+        val r = withContext(Dispatchers.Default) { computeList(kind, catalog, selection, sort, query, hidden) }
+        BrowseCache.put(catalog, cacheKey, r)
+        value = r
     }
+    val list = computed ?: emptyList()
+
     val grid = rememberLazyGridState()
     var shown by rememberSaveable { mutableStateOf(selection) }
     LaunchedEffect(selection) { if (shown != selection) { shown = selection; grid.scrollToItem(0) } }
@@ -135,7 +132,11 @@ fun MBrowseScreen(nav: Navigator, kind: Kind) {
                 selection,
             ) { if (it == "pick") sheet = true else selection = it }
 
-            if (list.isEmpty()) {
+            if (computed == null) {
+                Box(Modifier.fillMaxWidth().padding(top = 60.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = C.Text3, strokeWidth = 2.dp, modifier = Modifier.size(24.dp))
+                }
+            } else if (list.isEmpty()) {
                 MEmpty(when {
                     catalog.isEmpty -> "جارٍ التحميل…"
                     query.isNotEmpty() -> "ما لقينا شي باسم \"$query\""
@@ -171,6 +172,51 @@ fun MBrowseScreen(nav: Navigator, kind: Kind) {
             MSheet(if (isMovie) "تصنيفات الأفلام" else "تصنيفات المسلسلات", cats.map { "c:${it.id}" to it.name }, selection,
                 onPick = { selection = it; sheet = false }, onDismiss = { sheet = false })
         }
+    }
+}
+
+private fun itemsOf(kind: Kind, c: com.wm.iptv.data.Catalog): List<MItem> = BrowseCache.items(c, kind) {
+    if (kind == Kind.MOVIE) c.movies.map { MItem(it.id, it.name, it.icon, it.rating, it.added, it.categoryId, it.key) }
+    else c.series.map { MItem(it.id, it.name, it.cover, it.rating, it.updated, it.categoryId, it.key) }
+}
+
+private fun computeList(kind: Kind, catalog: com.wm.iptv.data.Catalog, selection: String, sort: Int, query: String, hidden: Set<String>): List<MItem> {
+    val all = itemsOf(kind, catalog)
+    val base = when {
+            selection == "all" -> all.filter { it.cat !in hidden }
+            selection == "recent" -> all.filter { it.cat !in hidden }.sortedByDescending { it.added }.take(300)
+            selection == "fav" -> { val byId = all.associateBy { it.id }; Repo.store.favoriteOrder(kind).mapNotNull { byId[it] } }
+            selection.startsWith("c:") -> all.filter { it.cat == selection.removePrefix("c:") }
+            else -> all
+        }
+        val q = TextNorm.key(query)
+        val f = if (q.isEmpty()) base else base.filter { TextNorm.matches(it.key, q) }
+        return if (selection == "recent" || selection == "fav") f
+        else when (sort) {
+            1 -> f.sortedBy { it.name.lowercase() }
+            2 -> f.sortedByDescending { it.rating.toDoubleOrNull() ?: 0.0 }
+            else -> f.sortedByDescending { it.added }
+        }
+}
+
+/** كاش صغير لنتائج القوائم: يرجع نفس النتيجة فوراً لما ترجع للصفحة */
+private object BrowseCache {
+    private var catalogRef: com.wm.iptv.data.Catalog? = null
+    private val lists = object : LinkedHashMap<String, List<MItem>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<MItem>>?) = size > 12
+    }
+    private val items = HashMap<Kind, List<MItem>>()
+
+    private fun check(c: com.wm.iptv.data.Catalog) {
+        if (catalogRef !== c) { catalogRef = c; lists.clear(); items.clear() }
+    }
+    @Synchronized fun get(c: com.wm.iptv.data.Catalog, key: String): List<MItem>? { check(c); return lists[key] }
+    @Synchronized fun put(c: com.wm.iptv.data.Catalog, key: String, v: List<MItem>) { check(c); lists[key] = v }
+    fun items(c: com.wm.iptv.data.Catalog, kind: Kind, make: () -> List<MItem>): List<MItem> {
+        synchronized(this) { check(c); items[kind]?.let { return it } }
+        val v = make()
+        synchronized(this) { if (catalogRef === c) items[kind] = v }
+        return v
     }
 }
 

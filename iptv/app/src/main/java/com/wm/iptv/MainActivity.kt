@@ -117,7 +117,7 @@ private fun Root(nav: Navigator, onExit: () -> Unit) {
 @Composable
 private fun LoadingScreen(step: String) {
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Text("WM TV", fontSize = 40.sp, fontWeight = FontWeight.Bold)
+        Text("WM", fontSize = 40.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(28.dp))
         CircularProgressIndicator(color = C.Text, strokeWidth = 3.dp)
         Spacer(Modifier.height(20.dp))

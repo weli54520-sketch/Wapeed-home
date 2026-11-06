@@ -202,6 +202,10 @@ fun MSettingsScreen(nav: Navigator) {
         item { MGroup("القوائم") }
         item { tick.let { }; MRow("تحديث القوائم عند فتح التطبيق", if (st.refreshOnOpen) "تشغيل" else "إيقاف") { st.refreshOnOpen = !st.refreshOnOpen; tick++ } }
 
+        item { MGroup("العرض") }
+        item { tick.let { }; MRow("تفاصيل الأفلام والمسلسلات بالعربي", if (st.arabicDetails) "تشغيل" else "إيقاف") { st.arabicDetails = !st.arabicDetails; Repo.clearDetailsCache(); tick++ } }
+        item { tick.let { }; MRow("تشغيل القناة فوق القائمة أولاً", if (st.livePreview) "تشغيل" else "إيقاف") { st.livePreview = !st.livePreview; tick++ } }
+
         item { MGroup("المشغل") }
         item { tick.let { }; MRow("صورة اللقطة أثناء التقديم", when (st.seekPreviewMode) { 1 -> "دايماً"; 2 -> "إيقاف"; else -> "تلقائي" }) { st.seekPreviewMode = (st.seekPreviewMode + 1) % 3; tick++ } }
         item { tick.let { }; MRow("الحلقة التالية تلقائياً", if (st.autoNextEpisode) "تشغيل" else "إيقاف") { st.autoNextEpisode = !st.autoNextEpisode; tick++ } }
@@ -317,7 +321,6 @@ fun MLoginScreen(onDone: () -> Unit, onCancel: (() -> Unit)? = null) {
         Spacer(Modifier.height(20.dp))
         Row(verticalAlignment = Alignment.Bottom) {
             Text("WM", fontSize = 36.sp, fontWeight = FontWeight.Bold)
-            Text(" TV", fontSize = 36.sp, color = C.Text3)
         }
         Text("أدخل بيانات اشتراك Xtream", fontSize = 15.sp, color = C.Text3)
         Spacer(Modifier.height(4.dp))

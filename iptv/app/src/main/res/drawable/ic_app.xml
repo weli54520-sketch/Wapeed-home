@@ -1,9 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- شعار WM: تدرج بنفسجي ← سماوي، والحرفين WM بخط التطبيق مع علامة تشغيل -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#0A0A0C" android:pathData="M0,0h108v108h-108z" />
-    <path android:fillColor="#F5F5F7" android:pathData="M30,34h48a6,6 0,0 1,6 6v28a6,6 0,0 1,-6 6h-48a6,6 0,0 1,-6 -6v-28a6,6 0,0 1,6 -6z" />
-    <path android:fillColor="#0A0A0C" android:pathData="M48,44l16,10l-16,10z" />
-    <path android:fillColor="#64D2FF" android:pathData="M40,80h28v4h-28z" />
+    <path android:pathData="M24,0H84A24,24 0,0 1,108,24V84A24,24 0,0 1,84,108H24A24,24 0,0 1,0,84V24A24,24 0,0 1,24,0Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="0" android:startY="0" android:endX="108" android:endY="108">
+                <item android:offset="0" android:color="#FF7C3AED" />
+                <item android:offset="0.55" android:color="#FF4F46E5" />
+                <item android:offset="1" android:color="#FF06B6D4" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="radial" android:centerX="30.240000000000002" android:centerY="17.28" android:gradientRadius="70.2"
+                android:startColor="#47FFFFFF" android:endColor="#00FFFFFF" />
+        </aapt:attr>
+    </path>
+    <path android:fillColor="#FFFFFFFF" android:pathData="M32.12 61.31 27 38.69H31.86L34 49.55L35.2 55.83H35.3L36.72 49.55L39.22 38.69H44.6L47.13 49.55L48.52 55.83H48.62L49.82 49.55L51.99 38.69H56.66L51.41 61.31H45.8L42.95 49.06L41.85 44.1H41.75L40.61 49.06L37.76 61.31ZM76.36 46.47H76.27L74.61 49.77L70.21 57.78L65.9 49.81L64.18 46.24H64.08V61.31H59.45V38.69H64.66L70.21 49.29H70.27L75.75 38.69H81V61.31H76.36Z" />
+    <path android:fillColor="#FFFFFFFF" android:strokeColor="#FFFFFFFF" android:strokeWidth="1.6"
+        android:strokeLineJoin="round" android:pathData="M51,67.2 L51,75.8 L58.4,71.5 Z" />
 </vector>

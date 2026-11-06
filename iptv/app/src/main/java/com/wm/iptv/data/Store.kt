@@ -185,6 +185,11 @@ class Store(context: Context) {
         get() = prefs.getBoolean("refresh_on_open", true)
         set(v) { prefs.edit().putBoolean("refresh_on_open", v).apply() }
 
+    /** ترجمة قصة الفيلم/المسلسل وتصنيفه للعربي */
+    var arabicDetails: Boolean
+        get() = prefs.getBoolean("arabic_details", true)
+        set(v) { prefs.edit().putBoolean("arabic_details", v).apply() }
+
     var autoNextEpisode: Boolean
         get() = prefs.getBoolean("auto_next", true)
         set(v) { prefs.edit().putBoolean("auto_next", v).apply() }

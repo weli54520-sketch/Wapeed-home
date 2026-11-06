@@ -123,7 +123,7 @@ private fun MRoot(nav: Navigator, onExit: () -> Unit) {
 @Composable
 private fun MLoading(step: String) {
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Text("WM TV", fontSize = 34.sp, fontWeight = FontWeight.Bold)
+        Text("WM", fontSize = 40.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(24.dp))
         CircularProgressIndicator(color = C.Text, strokeWidth = 3.dp)
         Spacer(Modifier.height(18.dp))
@@ -143,7 +143,8 @@ private fun MMain(nav: Navigator) {
         CompositionLocalProvider(LocalBarSpace provides if (showBar) 96.dp else 0.dp) {
             AnimatedContent(
                 targetState = route,
-                transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(140)) },
+                // انتقال سريع: الصفحة القديمة تختفي بسرعة عشان ما ترسم صفحتين ثقيلة مع بعض
+                transitionSpec = { fadeIn(tween(170, delayMillis = 30)) togetherWith fadeOut(tween(80)) },
                 contentKey = { it.key },
                 label = "mnav",
             ) { r ->
