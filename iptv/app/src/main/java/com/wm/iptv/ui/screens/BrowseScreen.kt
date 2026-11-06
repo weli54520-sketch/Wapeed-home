@@ -48,6 +48,7 @@ import com.wm.iptv.ui.Pill
 import com.wm.iptv.ui.Poster
 import com.wm.iptv.ui.Route
 import com.wm.iptv.ui.SideItem
+import com.wm.iptv.ui.SmoothFocusScroll
 import com.wm.iptv.ui.rememberFocusMemory
 import com.wm.iptv.ui.track
 import kotlinx.coroutines.delay
@@ -140,7 +141,7 @@ private fun BrowseScreen(nav: Navigator, kind: Kind) {
         Row(Modifier.fillMaxSize()) {
             // ───── القائمة الجانبية ─────
             val side = rememberLazyListState()
-            LazyColumn(
+            SmoothFocusScroll { LazyColumn(
                 state = side,
                 modifier = Modifier.width(272.dp).fillMaxHeight().background(C.Panel),
                 contentPadding = PaddingValues(start = 20.dp, end = 14.dp, top = 18.dp, bottom = 40.dp),
@@ -172,7 +173,7 @@ private fun BrowseScreen(nav: Navigator, kind: Kind) {
                     SideItem(c.name, Modifier.track(mem, "s_$k"), selected = selection == k,
                         onFocus = { if (it) pending = k }, onClick = { selection = k })
                 }
-            }
+            } }
 
             // ───── الشبكة ─────
             Column(Modifier.weight(1f).fillMaxHeight().padding(start = 36.dp, end = 40.dp)) {
@@ -206,7 +207,7 @@ private fun BrowseScreen(nav: Navigator, kind: Kind) {
                         )
                     }
                 } else {
-                    LazyVerticalGrid(
+                    SmoothFocusScroll(0.45f) { LazyVerticalGrid(
                         columns = GridCells.Fixed(6),
                         state = grid,
                         contentPadding = PaddingValues(top = 16.dp, bottom = 60.dp, start = 4.dp, end = 4.dp),
@@ -230,7 +231,7 @@ private fun BrowseScreen(nav: Navigator, kind: Kind) {
                                 },
                             )
                         }
-                    }
+                    } }
                 }
             }
         }

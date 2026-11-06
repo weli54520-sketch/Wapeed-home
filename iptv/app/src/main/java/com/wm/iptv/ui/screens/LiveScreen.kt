@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -74,6 +75,7 @@ import com.wm.iptv.ui.Navigator
 import com.wm.iptv.ui.ProgressLine
 import com.wm.iptv.ui.Route
 import com.wm.iptv.ui.SideItem
+import com.wm.iptv.ui.SmoothFocusScroll
 import com.wm.iptv.ui.clockText
 import com.wm.iptv.ui.rememberFocusMemory
 import com.wm.iptv.ui.track
@@ -81,8 +83,16 @@ import kotlinx.coroutines.delay
 
 /** مشغل المعاينة الصغير — نوقفه قبل فتح ملء الشاشة عشان ما ينحسب اتصالين */
 class PreviewController {
-    var player: ExoPlayer? = null
-    fun stop() { player?.let { it.stop(); it.release() }; player = null }
+    /** مشغل واحد نعيد استخدامه لكل القنوات (أسرع وأقل ضغط على السيرفر) */
+    var player by mutableStateOf<ExoPlayer?>(null)
+        private set
+
+    fun obtain(ctx: android.content.Context): ExoPlayer = player ?: Players.create(ctx, live = true).also { player = it }
+
+    /** يوقف البث بدون ما يحذف المشغل */
+    fun pause() { try { player?.stop() } catch (_: Exception) {} }
+
+    fun stop() { player?.let { try { it.stop(); it.release() } catch (_: Exception) {} }; player = null }
 }
 
 @Composable
@@ -123,7 +133,7 @@ fun LiveScreen(nav: Navigator) {
     LaunchedEffect(focusedCh?.id) {
         val ch = focusedCh ?: return@LaunchedEffect
         if (!Repo.store.livePreview) return@LaunchedEffect
-        delay(900)
+        delay(650)
         previewCh = ch
     }
 
@@ -189,7 +199,7 @@ fun LiveScreen(nav: Navigator) {
             TopBar(nav, Route.Live)
             Row(Modifier.fillMaxSize()) {
                 // ───── التصنيفات ─────
-                LazyColumn(
+                SmoothFocusScroll { LazyColumn(
                     modifier = Modifier.width(230.dp).fillMaxHeight().background(C.Panel),
                     contentPadding = PaddingValues(start = 14.dp, end = 10.dp, top = 14.dp, bottom = 40.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -213,7 +223,7 @@ fun LiveScreen(nav: Navigator) {
                         SideItem(c.name, Modifier.track(mem, "cat_$k"), selected = catKey == k,
                             onFocus = { if (it) pendingCat = k }, onClick = { catKey = k })
                     }
-                }
+                } }
 
                 // ───── القنوات ─────
                 Column(Modifier.width(450.dp).fillMaxHeight().padding(horizontal = 14.dp)) {
@@ -232,7 +242,7 @@ fun LiveScreen(nav: Navigator) {
                             )
                         }
                     } else {
-                        LazyColumn(state = list, contentPadding = PaddingValues(top = 4.dp, bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        SmoothFocusScroll { LazyColumn(state = list, contentPadding = PaddingValues(top = 4.dp, bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             itemsIndexed(channels, key = { _, ch -> ch.id }) { i, ch ->
                                 ChannelRow(
                                     ch, ch.id in favs, if (epgFor == ch.id) epg.firstOrNull() else Repo.cachedEpg(ch.id)?.firstOrNull(),
@@ -245,7 +255,7 @@ fun LiveScreen(nav: Navigator) {
                                     },
                                 )
                             }
-                        }
+                        } }
                     }
                 }
 
@@ -312,7 +322,7 @@ fun LiveScreen(nav: Navigator) {
 private fun ChannelRow(ch: Channel, fav: Boolean, now: EpgEntry?, mod: Modifier, onFocus: (Boolean) -> Unit, onClick: () -> Unit, onLong: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     FocusBox(mod.fillMaxWidth(), onClick = onClick, onLongClick = onLong, shape = RoundedCornerShape(14.dp), focusScale = 1.03f,
-        onFocus = { focused = it; onFocus(it) }) {
+        onFocus = { focused = it; onFocus(it) }, elevate = false) {
         Row(
             Modifier.fillMaxWidth().background(if (focused) C.Text else Color.Transparent).padding(horizontal = 12.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -341,27 +351,33 @@ private fun ChannelRow(ch: Channel, fav: Boolean, now: EpgEntry?, mod: Modifier,
 @Composable
 private fun PreviewPlayer(ch: Channel, ctrl: PreviewController) {
     val ctx = LocalContext.current
-    var error by remember { mutableStateOf(false) }
-    val player = remember(ch.id) {
-        ctrl.stop()
-        Players.create(ctx, live = true).also { p ->
-            ctrl.player = p
+    var error by remember(ch.id) { mutableStateOf(false) }
+    var attempt by remember(ch.id) { mutableStateOf(0) }
+    var ready by remember(ch.id) { mutableStateOf(false) }
+
+    // تشغيل القناة (ولو السيرفر رفض أول مرة — غالباً لأن الاتصال السابق ما انقفل — نعيد المحاولة)
+    LaunchedEffect(ch.id, attempt) {
+        if (attempt > 0) delay(1200L * attempt)
+        val p = ctrl.obtain(ctx)
+        error = false
+        try {
             p.setMediaItem(Players.item(Repo.liveUrl(ch.id)))
-            p.playWhenReady = true
             p.prepare()
-        }
+            p.playWhenReady = true
+        } catch (_: Exception) { error = true }
     }
-    DisposableEffect(player) {
+    val player = ctrl.player
+    DisposableEffect(player, ch.id) {
         val l = object : Player.Listener {
-            override fun onPlayerError(e: PlaybackException) { error = true }
+            override fun onPlayerError(e: PlaybackException) { if (attempt < 3) attempt++ else error = true }
+            override fun onRenderedFirstFrame() { ready = true }
         }
-        player.addListener(l)
-        onDispose {
-            try { player.removeListener(l) } catch (_: Exception) {}
-            // لو تبدل بمشغل جديد يكون انقفل من قبل
-            if (ctrl.player === player) ctrl.stop()
-        }
+        player?.addListener(l)
+        onDispose { try { player?.removeListener(l) } catch (_: Exception) {} }
     }
+    // لما تنتقل لقناة ثانية نوقف البث بس، والمشغل يبقى جاهز
+    DisposableEffect(Unit) { onDispose { ctrl.pause() } }
+
     AndroidView(
         factory = { c ->
             PlayerView(c).apply {
@@ -373,8 +389,13 @@ private fun PreviewPlayer(ch: Channel, ctrl: PreviewController) {
                 isFocusableInTouchMode = false
             }
         },
-        update = { it.player = player },
+        update = { it.player = ctrl.player },
+        onRelease = { it.player = null },
         modifier = Modifier.fillMaxSize(),
     )
-    if (error) Text("القناة لا تستجيب حالياً", fontSize = 13.sp, color = C.Text3)
+    when {
+        error -> Text("القناة لا تستجيب حالياً", fontSize = 13.sp, color = C.Text3)
+        !ready -> CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(28.dp))
+    }
 }
+

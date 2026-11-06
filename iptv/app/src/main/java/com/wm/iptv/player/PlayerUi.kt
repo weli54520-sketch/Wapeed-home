@@ -355,7 +355,7 @@ internal fun ChannelsPanel(vm: PlayerVm, act: PlayerActivity) {
     Box(Modifier.fillMaxSize().background(Color(0x66000000))) {
         Column(Modifier.align(Alignment.CenterStart).width(470.dp).fillMaxHeight().background(Color(0xF2111114)).padding(horizontal = 16.dp, vertical = 24.dp)) {
             Text(vm.listTitle, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 10.dp, bottom = 12.dp))
-            LazyColumn(state = state, verticalArrangement = Arrangement.spacedBy(3.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
+            com.wm.iptv.ui.SmoothFocusScroll { LazyColumn(state = state, verticalArrangement = Arrangement.spacedBy(3.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
                 if (prev != null && prev.id != cur?.id) {
                     item(key = "prev") {
                         SideItem("القناة السابقة: ${prev.name}", icon = Ico.Back, onClick = { act.previousChannel() })
@@ -366,7 +366,7 @@ internal fun ChannelsPanel(vm: PlayerVm, act: PlayerActivity) {
                         onClick = { act.selectChannel(c) },
                         onLong = { Repo.toggleFavorite(Kind.LIVE, c.id); if (c.id == cur?.id) vm.favorite = Repo.isFavorite(Kind.LIVE, c.id) })
                 }
-            }
+            } }
         }
     }
 }

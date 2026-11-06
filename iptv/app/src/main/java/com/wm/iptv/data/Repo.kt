@@ -242,6 +242,8 @@ object Repo {
     /** لما يتغير خيار الترجمة نمسح الكاش عشان التفاصيل تنجاب من جديد */
     fun clearDetailsCache() { vodCache.clear(); seriesCache.clear() }
 
+    fun cachedVodInfo(id: Int): VodInfo? = vodCache[id]
+
     fun cachedSeriesInfo(id: Int): SeriesInfo? = seriesCache[id]
 
     // ───────────── اختصارات ─────────────

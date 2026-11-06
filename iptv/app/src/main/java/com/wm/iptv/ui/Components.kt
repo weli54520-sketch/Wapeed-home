@@ -142,6 +142,7 @@ fun FocusBox(
     shape: Shape = RoundedCornerShape(14.dp),
     focusScale: Float = 1.08f,
     onFocus: ((Boolean) -> Unit)? = null,
+    elevate: Boolean = true,
     content: @Composable BoxScope.(focused: Boolean) -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -150,7 +151,7 @@ fun FocusBox(
     Box(
         modifier
             .graphicsLayer { scaleX = scale; scaleY = scale }
-            .shadow((22 * lift).dp, shape, clip = false, ambientColor = Color.Black, spotColor = Color.Black)
+            .then(if (elevate) Modifier.shadow((22 * lift).dp, shape, clip = false, ambientColor = Color.Black, spotColor = Color.Black) else Modifier)
             .onFocusChanged { focused = it.isFocused; onFocus?.invoke(it.isFocused) }
             .onSelect(onClick, onLongClick)
             .clip(shape)
@@ -196,10 +197,11 @@ fun Poster(
             }
             if (progress > 0.01f) ProgressLine(progress, Modifier.align(Alignment.BottomCenter).padding(8.dp))
         }
-        Spacer(Modifier.height(if (focused) 14.dp else 8.dp))
+        // المسافة ثابتة: لو تغيّر ارتفاع البطاقة مع التركيز كل الصف يتحرك ويهتز
+        Spacer(Modifier.height(14.dp))
         Text(
             title, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
-            fontSize = 13.sp, fontWeight = if (focused) FontWeight.SemiBold else FontWeight.Normal,
+            fontSize = 13.sp, fontWeight = FontWeight.Medium,
             color = if (focused) Color.White else C.Muted, modifier = Modifier.fillMaxWidth()
         )
     }
@@ -228,7 +230,7 @@ fun Landscape(
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0x99000000)))))
             if (progress > 0.01f) ProgressLine(progress, Modifier.align(Alignment.BottomCenter).padding(horizontal = 12.dp, vertical = 10.dp))
         }
-        Spacer(Modifier.height(if (focused) 12.dp else 7.dp))
+        Spacer(Modifier.height(12.dp))
         Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
             color = if (focused) Color.White else C.Text2)
         if (sub.isNotEmpty()) Text(sub, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp, color = C.Muted)
@@ -296,7 +298,7 @@ fun SideItem(
 ) {
     var focused by remember { mutableStateOf(false) }
     FocusBox(modifier.fillMaxWidth(), onClick = onClick, onLongClick = onLongClick, shape = RoundedCornerShape(12.dp), focusScale = 1.03f,
-        onFocus = { focused = it; onFocus?.invoke(it) }) {
+        onFocus = { focused = it; onFocus?.invoke(it) }, elevate = false) {
         val bg = when { focused -> C.Text; selected -> Color.White.copy(alpha = 0.12f); else -> Color.Transparent }
         val fg = when { focused -> C.Bg; selected -> Color.White; else -> C.Text3 }
         Row(Modifier.fillMaxWidth().background(bg).padding(horizontal = 14.dp, vertical = 10.dp),
@@ -405,4 +407,28 @@ fun TvRefreshButton(modifier: Modifier = Modifier) {
             SpinningRefresh(loading, if (focused) C.Bg else C.Text, 20.dp)
         }
     }
+}
+
+// ───────────────────────── تمرير ناعم للقوائم ─────────────────────────
+
+/**
+ * يخلي العنصر المحدد ثابت في نفس المكان تقريباً (pivot) والقائمة هي اللي تتحرك بنعومة،
+ * بدل ما تقفز القائمة لما يوصل التركيز لطرف الشاشة.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private class PivotSpec(private val pivot: Float) : androidx.compose.foundation.gestures.BringIntoViewSpec {
+    override val scrollAnimationSpec: androidx.compose.animation.core.AnimationSpec<Float> =
+        tween(durationMillis = 220, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+        if (size >= containerSize) return offset
+        return offset - (containerSize * pivot - size / 2f)
+    }
+}
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun SmoothFocusScroll(pivot: Float = 0.38f, content: @Composable () -> Unit) {
+    val spec = remember(pivot) { PivotSpec(pivot) }
+    androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides spec) { content() }
 }

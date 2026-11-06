@@ -34,6 +34,7 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -165,27 +166,32 @@ private fun MainArea(nav: Navigator) {
     }
 }
 
-/** شريط التنقل العلوي بستايل Apple TV */
+/**
+ * شريط التنقل العلوي بستايل Apple TV.
+ * currentFocus: لو انعطى، الزر الحالي ياخذ هذا الـ FocusRequester (عشان التطبيق يفتح والتركيز على الشريط).
+ * onNavFocus: يبلغ الشاشة أي زر واقف عليه (الرئيسية تعرض المباريات لما تقف على "المباشر").
+ */
 @Composable
-fun TopBar(nav: Navigator, current: Route, modifier: Modifier = Modifier) {
+fun TopBar(
+    nav: Navigator, current: Route, modifier: Modifier = Modifier,
+    currentFocus: androidx.compose.ui.focus.FocusRequester? = null,
+    onNavFocus: ((Route, Boolean) -> Unit)? = null,
+) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(15_000) } }
     Row(modifier.fillMaxWidth().padding(horizontal = 48.dp, vertical = 24.dp), verticalAlignment = Alignment.CenterVertically) {
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text("WM", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            Text(" TV", fontSize = 20.sp, color = C.Text3)
-        }
+        Text("WM", fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.weight(1f))
         Row(
             Modifier.background(Color(0x14FFFFFF), RoundedCornerShape(999.dp)).padding(5.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            NavPill("الرئيسية", current == Route.Home) { nav.go(Route.Home) }
-            NavPill("المباشر", current == Route.Live) { nav.go(Route.Live) }
-            NavPill("الأفلام", current == Route.Movies) { nav.go(Route.Movies) }
-            NavPill("المسلسلات", current == Route.SeriesList) { nav.go(Route.SeriesList) }
-            NavPill("", current == Route.Search, Ico.Search) { nav.go(Route.Search) }
-            NavPill("", current == Route.Settings, Ico.Gear) { nav.go(Route.Settings) }
+            NavItem("الرئيسية", Route.Home, current, nav, currentFocus, onNavFocus)
+            NavItem("المباشر", Route.Live, current, nav, currentFocus, onNavFocus)
+            NavItem("الأفلام", Route.Movies, current, nav, currentFocus, onNavFocus)
+            NavItem("المسلسلات", Route.SeriesList, current, nav, currentFocus, onNavFocus)
+            NavItem("", Route.Search, current, nav, currentFocus, onNavFocus, Ico.Search)
+            NavItem("", Route.Settings, current, nav, currentFocus, onNavFocus, Ico.Gear)
         }
         Spacer(Modifier.weight(1f))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -197,6 +203,12 @@ fun TopBar(nav: Navigator, current: Route, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun NavPill(text: String, selected: Boolean, icon: androidx.compose.ui.graphics.vector.ImageVector? = null, onClick: () -> Unit) {
-    Pill(text, icon = icon, selected = selected, onClick = onClick)
+private fun NavItem(
+    text: String, r: Route, current: Route, nav: Navigator,
+    currentFocus: androidx.compose.ui.focus.FocusRequester?, onNavFocus: ((Route, Boolean) -> Unit)?,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+) {
+    val m = if (r == current && currentFocus != null) Modifier.focusRequester(currentFocus) else Modifier
+    Pill(text, m, icon = icon, selected = current == r, onClick = { nav.go(r) },
+        onFocus = if (onNavFocus != null) { f -> onNavFocus(r, f) } else null)
 }

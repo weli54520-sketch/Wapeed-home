@@ -1,6 +1,16 @@
 package com.wm.iptv.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.graphicsLayer
+import com.wm.iptv.data.Sports
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -63,9 +73,34 @@ fun HomeScreen(nav: Navigator) {
     val ctx = LocalContext.current
     val mem = rememberFocusMemory("home")
 
-    val hero: Movie? = remember(catalog) { catalog.recentMovies.firstOrNull { it.icon.isNotBlank() } ?: catalog.recentMovies.firstOrNull() }
+    // الواجهة تتبدل بين أحدث الأفلام كل كم ثانية (وتوقف لما تكون واقف على أزرارها)
+    val heroes: List<Movie> = remember(catalog) {
+        catalog.recentMovies.filter { it.icon.isNotBlank() }.take(8).ifEmpty { catalog.recentMovies.take(1) }
+    }
+    var heroIdx by rememberSaveable { mutableIntStateOf(0) }
+    val hero: Movie? = heroes.getOrNull(heroIdx % heroes.size.coerceAtLeast(1))
     var heroInfo by remember { mutableStateOf<VodInfo?>(null) }
-    LaunchedEffect(hero?.id) { heroInfo = hero?.let { Repo.vodInfo(it.id) } }
+    LaunchedEffect(hero?.id) {
+        heroInfo = Repo.cachedVodInfo(hero?.id ?: 0)
+        heroInfo = hero?.let { Repo.vodInfo(it.id) }
+        // نجهز اللي بعده عشان التبديل يكون على طول
+        heroes.getOrNull((heroIdx + 1) % heroes.size.coerceAtLeast(1))?.let { Repo.vodInfo(it.id) }
+    }
+    var heroFocused by remember { mutableStateOf(false) }
+    var navFocus by remember { mutableStateOf<Route?>(null) }
+    val showMatches = navFocus == Route.Live
+    LaunchedEffect(heroes, heroFocused, showMatches) {
+        if (heroes.size < 2) return@LaunchedEffect
+        while (true) {
+            delay(9_000)
+            if (!heroFocused && !showMatches) heroIdx = (heroIdx + 1) % heroes.size
+        }
+    }
+
+    // مباريات اليوم: نجيبها من أول ما تفتح الرئيسية ونحدثها كل دقيقتين
+    var matches by remember { mutableStateOf(Sports.cached()) }
+    LaunchedEffect(Unit) { while (true) { matches = Sports.today(); delay(120_000) } }
+    val navFr = remember { FocusRequester() }
 
     val cont = remember(version) { Repo.store.allProgress().filter { !it.finished && it.fraction > 0.01f }.take(20) }
     val favCh = remember(version, catalog) { Repo.store.favoriteOrder(Kind.LIVE).mapNotNull { catalog.channelById[it] }.take(30) }
@@ -80,23 +115,34 @@ fun HomeScreen(nav: Navigator) {
 
     LaunchedEffect(Unit) {
         delay(60)
-        if (!mem.restore()) mem.focus("hero_play")
+        // أول ما يفتح التطبيق: التركيز على الشريط العلوي
+        if (!mem.restore()) { try { navFr.requestFocus() } catch (_: Exception) { mem.focus("hero_play") } }
     }
 
     Box(Modifier.fillMaxSize().background(C.Bg)) {
         // خلفية الفيلم المميز
         Box(Modifier.fillMaxWidth().height(500.dp)) {
             val bg = heroInfo?.backdrop?.takeIf { it.isNotBlank() } ?: hero?.icon ?: ""
-            Art(bg, hero?.id ?: 0, "")
+            Crossfade(targetState = if (showMatches) "matches" else bg, animationSpec = tween(600), label = "herobg") { b ->
+                Box(Modifier.fillMaxSize()) {
+                    if (b == "matches") MatchesBackdrop() else Art(b, hero?.id ?: 0, "")
+                }
+            }
             Box(Modifier.matchParentSize().background(Brush.horizontalGradient(listOf(Color(0xF00A0A0C), Color(0x990A0A0C), Color.Transparent), startX = Float.POSITIVE_INFINITY, endX = 0f)))
             Box(Modifier.matchParentSize().background(Brush.verticalGradient(0.4f to Color.Transparent, 1f to C.Bg)))
         }
 
         val listState = rememberLazyListState()
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 60.dp)) {
-            item(key = "top") { TopBar(nav, Route.Home) }
+            item(key = "top") { TopBar(nav, Route.Home, currentFocus = navFr, onNavFocus = { r, f -> if (f) navFocus = r else if (navFocus == r) navFocus = null }) }
             item(key = "hero") {
-                Column(Modifier.padding(start = 64.dp, top = 40.dp, bottom = 36.dp).width(600.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+              // ارتفاع ثابت: الفيلم يتبدل والمباريات تطلع بدون ما تتحرك الصفوف اللي تحت
+              Box(Modifier.fillMaxWidth().height(460.dp)) {
+                if (showMatches) MatchesShowcase(matches, Modifier.padding(start = 64.dp, end = 64.dp, top = 8.dp, bottom = 12.dp))
+                Column(Modifier.padding(start = 64.dp, top = 40.dp, bottom = 36.dp).width(600.dp)
+                    .graphicsLayer { alpha = if (showMatches) 0f else 1f }
+                    .onFocusChanged { heroFocused = it.hasFocus },
+                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (expiry != null) Text(expiry, color = C.Star, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     Text("المضاف حديثاً", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = C.Accent)
                     Text(hero?.name ?: "أهلاً فيك", fontSize = 50.sp, fontWeight = FontWeight.Bold, lineHeight = 58.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -115,7 +161,15 @@ fun HomeScreen(nav: Navigator) {
                             onClick = { PlayerLauncher.movie(ctx, hero, if (p != null && !p.finished) p.position else 0L) })
                         Pill("التفاصيل", big = true, modifier = Modifier.track(mem, "hero_info"), onClick = { nav.go(Route.MovieDetail(hero.id)) })
                     }
+                    // نقاط تبين ترتيب الفيلم المعروض
+                    if (heroes.size > 1) Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        heroes.indices.forEach { i ->
+                            Box(Modifier.size(width = if (i == heroIdx % heroes.size) 18.dp else 6.dp, height = 6.dp)
+                                .background(if (i == heroIdx % heroes.size) Color.White else Color.White.copy(alpha = 0.3f), RoundedCornerShape(3.dp)))
+                        }
+                    }
                 }
+              }
             }
 
             if (cont.isNotEmpty()) item(key = "cont") {
