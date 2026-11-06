@@ -190,6 +190,11 @@ class Store(context: Context) {
         get() = prefs.getBoolean("arabic_details", true)
         set(v) { prefs.edit().putBoolean("arabic_details", v).apply() }
 
+    /** تقسيم شاشة القنوات (جوال): 0 تلقائي (لما تلف الجهاز بالعرض) — 1 دايماً — 2 إيقاف */
+    var liveSplit: Int
+        get() = prefs.getInt("live_split", 0)
+        set(v) { prefs.edit().putInt("live_split", v).apply() }
+
     var autoNextEpisode: Boolean
         get() = prefs.getBoolean("auto_next", true)
         set(v) { prefs.edit().putBoolean("auto_next", v).apply() }

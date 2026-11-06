@@ -1,6 +1,10 @@
 package com.wm.iptv.mobile
 
+import android.content.Context
+import android.view.Surface
+import android.view.WindowManager
 import android.widget.Toast
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -286,10 +290,19 @@ fun MLiveScreen(nav: Navigator) {
     }
     val current = dock.channel
 
+    // دوران الجهاز الفعلي (مو أبعاد النافذة): الفولد المفتوح شاشته شبه مربعة فالأبعاد تضلل
+    val cfg = LocalConfiguration.current
+    val rotated = remember(cfg) {
+        @Suppress("DEPRECATION")
+        val r = (ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay.rotation
+        r == Surface.ROTATION_90 || r == Surface.ROTATION_270
+    }
+    val splitMode = Repo.store.liveSplit
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        // الشاشة بالعرض (عرضها أكبر من ارتفاعها): المشغل بجنب القائمة بدل ما يغطيها
         val screenW = maxWidth
-        val wide = screenW > maxHeight && screenW >= 480.dp
+        // لما تلف الجهاز بالعرض: المشغل بجنب القائمة بدل ما يغطيها (ويمكن تغييرها من الإعدادات)
+        val wide = screenW >= 480.dp && when (splitMode) { 1 -> true; 2 -> false; else -> rotated }
         // بالطول (جوال أو فولد): المشغل مثبّت فوق القائمة، مثل ما كان
         val docked = current != null && !wide
 

@@ -204,6 +204,7 @@ fun MSettingsScreen(nav: Navigator) {
 
         item { MGroup("العرض") }
         item { tick.let { }; MRow("تفاصيل الأفلام والمسلسلات بالعربي", if (st.arabicDetails) "تشغيل" else "إيقاف") { st.arabicDetails = !st.arabicDetails; Repo.clearDetailsCache(); tick++ } }
+        item { tick.let { }; MRow("تقسيم شاشة القنوات (المشغل بجنب القائمة)", when (st.liveSplit) { 1 -> "دايماً"; 2 -> "إيقاف"; else -> "تلقائي (بالعرض)" }) { st.liveSplit = (st.liveSplit + 1) % 3; tick++ } }
         item { tick.let { }; MRow("تشغيل القناة فوق القائمة أولاً", if (st.livePreview) "تشغيل" else "إيقاف") { st.livePreview = !st.livePreview; tick++ } }
 
         item { MGroup("المشغل") }
