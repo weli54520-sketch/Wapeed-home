@@ -66,6 +66,16 @@ data class Catalog(
 
     val recentMovies: List<Movie> by lazy { movies.sortedByDescending { it.added }.take(300) }
     val recentSeries: List<Series> by lazy { series.sortedByDescending { it.updated }.take(300) }
+
+    /** الأعلى تقييماً (يتحسبون مرة وحدة، وتنادى من خيط خلفي) */
+    val topMovies: List<Movie> by lazy {
+        movies.filter { (it.rating.toDoubleOrNull() ?: 0.0) > 0.0 }
+            .sortedWith(compareByDescending<Movie> { it.rating.toDoubleOrNull() ?: 0.0 }.thenByDescending { it.added }).take(40)
+    }
+    val topSeries: List<Series> by lazy {
+        series.filter { (it.rating.toDoubleOrNull() ?: 0.0) > 0.0 }
+            .sortedWith(compareByDescending<Series> { it.rating.toDoubleOrNull() ?: 0.0 }.thenByDescending { it.updated }).take(40)
+    }
 }
 
 data class UserInfo(

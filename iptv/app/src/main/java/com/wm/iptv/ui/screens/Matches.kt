@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.wm.iptv.data.SportMatch
 import com.wm.iptv.ui.C
+import com.wm.iptv.ui.FocusBox
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -149,4 +150,26 @@ private fun MiniTeam(name: String, logo: String) {
 private fun Badge(text: String, color: Color) {
     Text(text, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White,
         modifier = Modifier.background(color, RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 2.dp))
+}
+
+/** بطاقة مباراة تتركز عليها بالريموت (تفتح المباشر) */
+@Composable
+fun MatchCard(m: SportMatch, focusMod: Modifier = Modifier, onClick: () -> Unit) {
+    FocusBox(focusMod.width(250.dp).height(116.dp), onClick = onClick, shape = RoundedCornerShape(16.dp), focusScale = 1.06f) { _ ->
+        Column(
+            Modifier.fillMaxSize()
+                .background(Brush.verticalGradient(listOf(Color(0x40FFFFFF), Color(0x14FFFFFF))))
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (m.live) { Box(Modifier.size(7.dp).background(C.Live, CircleShape)); Spacer(Modifier.width(6.dp)) }
+                Text(m.league, fontSize = 11.sp, color = C.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text(if (m.score.isNotEmpty()) m.score else matchTime(m.startMs), fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    color = if (m.live) C.Live else C.Text)
+            }
+            MiniTeam(m.home, m.homeLogo)
+            MiniTeam(m.away, m.awayLogo)
+        }
+    }
 }
