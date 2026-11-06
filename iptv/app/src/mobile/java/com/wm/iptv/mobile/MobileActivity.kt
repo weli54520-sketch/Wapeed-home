@@ -289,7 +289,8 @@ private fun FloatingBar(nav: Navigator, current: Route) {
                 releasedFrom = follow.value
                 dragging = false
                 val r = tabs[target].route
-                if (r != current) nav.go(r)
+                // نقارن بالقسم الحالي الفعلي (مو القيمة القديمة المحفوظة داخل الإيماءة)
+                if (r != nav.top) nav.go(r)
             }
 
             Box(
