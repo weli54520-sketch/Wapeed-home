@@ -1,25 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- شعار WM: تدرج بنفسجي ← سماوي، والحرفين WM بخط التطبيق مع علامة تشغيل -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="320dp" android:height="180dp"
     android:viewportWidth="320" android:viewportHeight="180">
-    <path android:pathData="M0,0h320v180h-320z">
-        <aapt:attr name="android:fillColor">
-            <gradient android:type="linear" android:startX="0" android:startY="0" android:endX="320" android:endY="180">
-                <item android:offset="0" android:color="#FF7C3AED" />
-                <item android:offset="0.55" android:color="#FF4F46E5" />
-                <item android:offset="1" android:color="#FF06B6D4" />
-            </gradient>
-        </aapt:attr>
-    </path>
-    <path android:pathData="M0,0h320v180h-320z">
-        <aapt:attr name="android:fillColor">
-            <gradient android:type="radial" android:centerX="89.60000000000001" android:centerY="28.8" android:gradientRadius="208.0"
-                android:startColor="#47FFFFFF" android:endColor="#00FFFFFF" />
-        </aapt:attr>
-    </path>
-    <path android:fillColor="#FFFFFFFF" android:pathData="M117.86 101.79 108 58.21H117.36L121.48 79.13L123.79 91.24H123.98L126.73 79.13L131.53 58.21H141.9L146.77 79.13L149.45 91.24H149.64L151.95 79.13L156.13 58.21H165.12L155.01 101.79H144.21L138.71 78.19L136.59 68.64H136.4L134.22 78.19L128.73 101.79ZM203.07 73.2H202.89L199.7 79.56L191.21 94.98L182.91 79.63L179.6 72.76H179.41V101.79H170.49V58.21H180.54L191.21 78.63H191.34L201.89 58.21H212V101.79H203.07Z" />
-    <path android:fillColor="#FFFFFFFF" android:strokeColor="#FFFFFFFF" android:strokeWidth="3"
-        android:strokeLineJoin="round" android:pathData="M154,113 L154,129 L168,121 Z" />
+    <path android:fillColor="#0A0A0C" android:pathData="M0,0h320v180h-320z" />
+    <path android:fillColor="#F5F5F7" android:pathData="M62,60h56a8,8 0,0 1,8 8v36a8,8 0,0 1,-8 8h-56a8,8 0,0 1,-8 -8v-36a8,8 0,0 1,8 -8z" />
+    <path android:fillColor="#0A0A0C" android:pathData="M84,72l20,14l-20,14z" />
+    <path android:fillColor="#64D2FF" android:pathData="M70,122h40v5h-40z" />
+    <!-- W -->
+    <path android:fillColor="#F5F5F7" android:pathData="M150,64h9l6,32l7,-32h8l7,32l6,-32h9l-11,46h-8l-7,-30l-7,30h-8z" />
+    <!-- M -->
+    <path android:fillColor="#F5F5F7" android:pathData="M216,64h10l10,28l10,-28h10v46h-8v-32l-9,26h-6l-9,-26v32h-8z" />
+    <!-- TV -->
+    <path android:fillColor="#A1A1A6" android:pathData="M262,64h22v7h-7v39h-8v-39h-7z" />
+    <path android:fillColor="#A1A1A6" android:pathData="M286,64h8l6,32l6,-32h8l-10,46h-8z" />
 </vector>

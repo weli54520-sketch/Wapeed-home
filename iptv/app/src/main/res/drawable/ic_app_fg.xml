@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- شعار WM: تدرج بنفسجي ← سماوي، والحرفين WM بخط التطبيق مع علامة تشغيل -->
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp" android:height="108dp"
-    android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#FFFFFFFF" android:pathData="M32.12 61.31 27 38.69H31.86L34 49.55L35.2 55.83H35.3L36.72 49.55L39.22 38.69H44.6L47.13 49.55L48.52 55.83H48.62L49.82 49.55L51.99 38.69H56.66L51.41 61.31H45.8L42.95 49.06L41.85 44.1H41.75L40.61 49.06L37.76 61.31ZM76.36 46.47H76.27L74.61 49.77L70.21 57.78L65.9 49.81L64.18 46.24H64.08V61.31H59.45V38.69H64.66L70.21 49.29H70.27L75.75 38.69H81V61.31H76.36Z" />
-    <path android:fillColor="#FFFFFFFF" android:strokeColor="#FFFFFFFF" android:strokeWidth="1.6"
-        android:strokeLineJoin="round" android:pathData="M51,67.2 L51,75.8 L58.4,71.5 Z" />
-</vector>
