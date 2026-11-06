@@ -1,6 +1,25 @@
 package com.wm.iptv
 
 import android.os.Bundle
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.draw.shadow
+import com.wm.iptv.ui.onSelect
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -18,7 +37,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,11 +45,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
@@ -182,17 +198,7 @@ fun TopBar(
     Row(modifier.fillMaxWidth().padding(horizontal = 48.dp, vertical = 24.dp), verticalAlignment = Alignment.CenterVertically) {
         Text("Waleed TV", fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.weight(1f))
-        Row(
-            Modifier.background(Color(0x14FFFFFF), RoundedCornerShape(999.dp)).padding(5.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            NavItem("الرئيسية", Route.Home, current, nav, currentFocus, onNavFocus)
-            NavItem("المباشر", Route.Live, current, nav, currentFocus, onNavFocus)
-            NavItem("الأفلام", Route.Movies, current, nav, currentFocus, onNavFocus)
-            NavItem("المسلسلات", Route.SeriesList, current, nav, currentFocus, onNavFocus)
-            NavItem("", Route.Search, current, nav, currentFocus, onNavFocus, Ico.Search)
-            NavItem("", Route.Settings, current, nav, currentFocus, onNavFocus, Ico.Gear)
-        }
+        GlassNavBar(nav, current, currentFocus, onNavFocus)
         Spacer(Modifier.weight(1f))
         Row(verticalAlignment = Alignment.CenterVertically) {
             com.wm.iptv.ui.TvRefreshButton()
@@ -202,13 +208,73 @@ fun TopBar(
     }
 }
 
+private data class BarTab(val route: Route, val label: String, val icon: ImageVector)
+
+private val barTabs = listOf(
+    BarTab(Route.Home, "الرئيسية", Ico.Home),
+    BarTab(Route.Live, "المباشر", Ico.Tv),
+    BarTab(Route.Movies, "الأفلام", Ico.Film),
+    BarTab(Route.SeriesList, "المسلسلات", Ico.Stack),
+    BarTab(Route.Search, "بحث", Ico.Search),
+    BarTab(Route.Settings, "الإعدادات", Ico.Gear),
+)
+
+/**
+ * نفس شريط الجوال: كبسولة زجاجية فيها فقاعة تنزلق بنعومة تحت القسم.
+ * على التلفزيون الفقاعة تمشي مع الريموت (التركيز)، ولما يطلع التركيز من الشريط ترجع تقعد على القسم الحالي.
+ */
 @Composable
-private fun NavItem(
-    text: String, r: Route, current: Route, nav: Navigator,
-    currentFocus: androidx.compose.ui.focus.FocusRequester?, onNavFocus: ((Route, Boolean) -> Unit)?,
-    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+private fun GlassNavBar(
+    nav: Navigator, current: Route,
+    currentFocus: androidx.compose.ui.focus.FocusRequester?,
+    onNavFocus: ((Route, Boolean) -> Unit)?,
 ) {
-    val m = if (r == current && currentFocus != null) Modifier.focusRequester(currentFocus) else Modifier
-    Pill(text, m, icon = icon, selected = current == r, onClick = { nav.go(r) },
-        onFocus = if (onNavFocus != null) { f -> onNavFocus(r, f) } else null)
+    val shape = RoundedCornerShape(999.dp)
+    val itemW = 104.dp
+    val itemH = 56.dp
+    val selected = barTabs.indexOfFirst { it.route == current }.coerceAtLeast(0)
+    var focusedIdx by remember { mutableStateOf<Int?>(null) }
+    val target = focusedIdx ?: selected
+    val bubbleX by animateDpAsState(itemW * target, spring(dampingRatio = 0.78f, stiffness = 420f), label = "bubble")
+    val hot by animateFloatAsState(if (focusedIdx != null) 1f else 0f, tween(140), label = "hot")
+
+    Box(
+        Modifier
+            .shadow(18.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
+            .clip(shape)
+            // زجاج: طبقة غامقة شفافة + لمعة خفيفة من فوق + إطار رفيع لامع (نفس الجوال)
+            .background(Color(0x700A0A0E))
+            .background(Brush.verticalGradient(listOf(Color(0x1AFFFFFF), Color(0x00FFFFFF))))
+            .border(0.8.dp, Brush.verticalGradient(listOf(Color(0x59FFFFFF), Color(0x0DFFFFFF))), shape)
+            .padding(5.dp)
+    ) {
+        // فقاعة التحديد: هادئة لو على القسم الحالي، وأوضح وأكبر شوي لما التركيز عليها
+        Box(
+            Modifier.offset(x = bubbleX).width(itemW).height(itemH)
+                .graphicsLayer { scaleX = 1f + 0.06f * hot; scaleY = 1f + 0.06f * hot }
+                .clip(shape)
+                .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.18f + 0.24f * hot), Color.White.copy(alpha = 0.06f + 0.10f * hot))))
+                .border(0.8.dp, Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.25f + 0.35f * hot), Color.White.copy(alpha = 0.08f + 0.10f * hot))), shape)
+        )
+        Row {
+            barTabs.forEachIndexed { i, t ->
+                val on = i == (focusedIdx ?: selected)
+                val color by animateColorAsState(if (on) Color.White else Color(0xFFB8B8BE), tween(140), label = "c")
+                Column(
+                    Modifier.width(itemW).height(itemH)
+                        .then(if (t.route == current && currentFocus != null) Modifier.focusRequester(currentFocus) else Modifier)
+                        .onFocusChanged {
+                            if (it.isFocused) { focusedIdx = i; onNavFocus?.invoke(t.route, true) }
+                            else if (focusedIdx == i) { focusedIdx = null; onNavFocus?.invoke(t.route, false) }
+                        }
+                        .onSelect({ nav.go(t.route) }),
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(t.icon, t.label, tint = color, modifier = Modifier.size(21.dp))
+                    Spacer(Modifier.height(3.dp))
+                    Text(t.label, fontSize = 11.sp, color = color, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium, maxLines = 1)
+                }
+            }
+        }
+    }
 }
