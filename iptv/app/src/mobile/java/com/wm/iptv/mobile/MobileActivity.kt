@@ -3,7 +3,9 @@ package com.wm.iptv.mobile
 import android.os.Bundle
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
@@ -251,6 +253,8 @@ private fun FloatingBar(nav: Navigator, current: Route) {
     var releasedFrom by remember { mutableStateOf<Float?>(null) }
     val bubbleX = remember { Animatable(0f) }
     val press by animateFloatAsState(if (dragging) 1f else 0f, spring(dampingRatio = 0.7f, stiffness = 500f), label = "press")
+    // الفقاعة تلحق إصبعك بنعومة سريعة (تتبّع شبه فوري)
+    val follow = animateFloatAsState(dragPx, spring(dampingRatio = 0.9f, stiffness = 1500f), label = "follow")
 
     Box(Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp).fillMaxWidth()) {
         BoxWithConstraints(
@@ -259,15 +263,15 @@ private fun FloatingBar(nav: Navigator, current: Route) {
                 .shadow(20.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
                 .clip(shape)
                 // زجاج: طبقة غامقة شفافة + لمعة بيضاء من فوق + إطار رفيع لامع
-                .background(Color(0x4D0C0C10))
-                .background(Brush.verticalGradient(listOf(Color(0x4DFFFFFF), Color(0x0DFFFFFF))))
-                .border(0.8.dp, Brush.verticalGradient(listOf(Color(0x8CFFFFFF), Color(0x1AFFFFFF))), shape)
+                .background(Color(0x700A0A0E))
+                .background(Brush.verticalGradient(listOf(Color(0x1AFFFFFF), Color(0x00FFFFFF))))
+                .border(0.8.dp, Brush.verticalGradient(listOf(Color(0x59FFFFFF), Color(0x0DFFFFFF))), shape)
                 .padding(5.dp)
         ) {
             val itemW = maxWidth / tabs.size
             val wpx = with(density) { itemW.toPx() }
             val maxPx = wpx * (tabs.size - 1)
-            val bubblePx = if (dragging) dragPx else bubbleX.value
+            val bubblePx = if (dragging) follow.value else bubbleX.value
             val shownIndex = if (dragging && wpx > 0f) (dragPx / wpx).roundToInt().coerceIn(0, tabs.size - 1) else index
 
             // الفقاعة ترجع/تروح للقسم الحالي بنعومة (ومن مكان ما تركتها لو كنت تسحب)
@@ -282,7 +286,7 @@ private fun FloatingBar(nav: Navigator, current: Route) {
             fun finishDrag() {
                 if (!dragging) return
                 val target = (dragPx / wpx).roundToInt().coerceIn(0, tabs.size - 1)
-                releasedFrom = dragPx
+                releasedFrom = follow.value
                 dragging = false
                 val r = tabs[target].route
                 if (r != current) nav.go(r)
@@ -290,13 +294,18 @@ private fun FloatingBar(nav: Navigator, current: Route) {
 
             Box(
                 Modifier.fillMaxSize().pointerInput(wpx, rtl) {
-                    detectHorizontalDragGestures(
-                        onDragStart = { dragPx = bubbleX.value; dragging = true },
-                        onDragEnd = { finishDrag() },
-                        onDragCancel = { finishDrag() },
-                    ) { change, dx ->
-                        change.consume()
-                        dragPx = (dragPx + (if (rtl) -dx else dx)).coerceIn(0f, maxPx)
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        // أول ما تلمس: الفقاعة تروح تحت إصبعك مباشرة (مركزها = مكان إصبعك)
+                        fun target(x: Float) = ((if (rtl) size.width - x else x) - wpx / 2f).coerceIn(0f, maxPx)
+                        dragPx = target(down.position.x)
+                        dragging = true
+                        drag(down.id) { change ->
+                            change.consume()
+                            dragPx = target(change.position.x)
+                        }
+                        // رفعت إصبعك: تثبت على أقرب قسم وتنتقل له (والضغطة العادية تنتقل لنفس القسم اللي ضغطته)
+                        finishDrag()
                     }
                 }
             ) {
@@ -305,15 +314,15 @@ private fun FloatingBar(nav: Navigator, current: Route) {
                     Modifier.offset { IntOffset(bubblePx.roundToInt(), 0) }.width(itemW).fillMaxHeight()
                         .graphicsLayer { scaleX = 1f + 0.12f * press; scaleY = 1f + 0.1f * press }
                         .clip(shape)
-                        .background(Brush.verticalGradient(listOf(Color(0x73FFFFFF), Color(0x2EFFFFFF))))
-                        .border(0.8.dp, Brush.verticalGradient(listOf(Color(0xA6FFFFFF), Color(0x33FFFFFF))), shape)
+                        .background(Brush.verticalGradient(listOf(Color(0x40FFFFFF), Color(0x14FFFFFF))))
+                        .border(0.8.dp, Brush.verticalGradient(listOf(Color(0x73FFFFFF), Color(0x1AFFFFFF))), shape)
                 )
                 Row(Modifier.fillMaxSize()) {
                     tabs.forEachIndexed { i, t ->
                         val sel = i == shownIndex
-                        val color by animateColorAsState(if (sel) Color.White else Color(0xFFC4C4CA), label = "c")
+                        val color by animateColorAsState(if (sel) Color.White else Color(0xFFB8B8BE), label = "c")
                         Column(
-                            Modifier.weight(1f).fillMaxHeight().clip(shape).plainClick { nav.go(t.route) },
+                            Modifier.weight(1f).fillMaxHeight(),
                             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center
                         ) {
                             Icon(t.icon, t.label, tint = color, modifier = Modifier.size(21.dp))
