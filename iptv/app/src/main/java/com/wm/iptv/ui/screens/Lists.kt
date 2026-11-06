@@ -5,6 +5,16 @@ import com.wm.iptv.data.Channel
 import com.wm.iptv.data.Kind
 import com.wm.iptv.data.Repo
 
+/** معرّفات آخر ما شاهدته من الأفلام أو المسلسلات (الأحدث أولاً) */
+fun watchedIds(kind: Kind): List<Int> {
+    val all = Repo.store.allProgress() // مرتبة من الأحدث
+    return when (kind) {
+        Kind.MOVIE -> all.filter { it.key.startsWith("m:") }.mapNotNull { it.key.removePrefix("m:").toIntOrNull() }
+        Kind.SERIES -> all.filter { it.key.startsWith("e:") && it.seriesId > 0 }.map { it.seriesId }.distinct()
+        else -> emptyList()
+    }
+}
+
 /** مفاتيح القوائم الخاصة في المباشر */
 object LiveKeys {
     const val FAV = "fav"

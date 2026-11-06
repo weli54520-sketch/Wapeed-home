@@ -53,6 +53,9 @@ object Repo {
     private val vodCache = ConcurrentHashMap<Int, VodInfo>()
     private val seriesCache = ConcurrentHashMap<Int, SeriesInfo>()
 
+    /** آخر قناة وقف عليها التركيز في قائمة المباشر (تلفزيون) — عشان نرجع لها لو طلعت وجيت */
+    @Volatile var liveFocusId: Int = 0
+
     fun init(context: Context) {
         if (::store.isInitialized) return
         store = Store(context.applicationContext)

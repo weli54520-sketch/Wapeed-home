@@ -93,7 +93,7 @@ fun MBrowseScreen(nav: Navigator, kind: Kind) {
 
     // الفلترة والترتيب في خيط خلفي (آلاف العناصر) عشان التنقل يكون ناعم، ونحفظ آخر نتيجة
     // عشان لما ترجع من صفحة التفاصيل تطلع القائمة على طول بدون ما تنحسب من جديد
-    val cacheKey = "$kind|$selection|$sort|$query|${favs.hashCode()}|${hidden.hashCode()}"
+    val cacheKey = "$kind|$selection|$sort|$query|${favs.hashCode()}|${hidden.hashCode()}|${if (selection == "watched") version else 0}"
     val computed by produceState(BrowseCache.get(catalog, cacheKey), catalog, cacheKey) {
         BrowseCache.get(catalog, cacheKey)?.let { value = it; return@produceState }
         if (query.isNotEmpty()) delay(150)
@@ -114,7 +114,7 @@ fun MBrowseScreen(nav: Navigator, kind: Kind) {
         Column(Modifier.fillMaxSize()) {
             MHeader(if (isMovie) "الأفلام" else "المسلسلات") {
                 MRefreshButton()
-                if (selection != "recent" && selection != "fav")
+                if (selection != "recent" && selection != "fav" && selection != "watched")
                     MIconButton(Ico.Sort, "الترتيب") {
                         sort = (sort + 1) % 3
                         Toast.makeText(ctx, "الترتيب: " + when (sort) { 1 -> "الاسم"; 2 -> "التقييم"; else -> "الأحدث" }, Toast.LENGTH_SHORT).show()
@@ -126,7 +126,7 @@ fun MBrowseScreen(nav: Navigator, kind: Kind) {
                     Modifier.padding(horizontal = 18.dp, vertical = 4.dp), autoFocus = true, leading = Ico.Search)
             }
             MChips(
-                listOf("all" to "الكل", "recent" to "المضاف حديثاً", "fav" to "المفضلة") +
+                listOf("all" to "الكل", "recent" to "المضاف حديثاً", "watched" to "آخر مشاهدة", "fav" to "المفضلة") +
                     (if (selection.startsWith("c:")) listOf(selection to catTitle) else emptyList()) +
                     listOf("pick" to "التصنيفات ▾"),
                 selection,
@@ -141,6 +141,7 @@ fun MBrowseScreen(nav: Navigator, kind: Kind) {
                     catalog.isEmpty -> "جارٍ التحميل…"
                     query.isNotEmpty() -> "ما لقينا شي باسم \"$query\""
                     selection == "fav" -> "اضغط مطوّلاً على أي ${if (isMovie) "فيلم" else "مسلسل"} عشان تضيفه للمفضلة"
+                    selection == "watched" -> "ما شاهدت شي للحين"
                     else -> "القائمة فاضية"
                 })
             } else {
@@ -186,12 +187,13 @@ private fun computeList(kind: Kind, catalog: com.wm.iptv.data.Catalog, selection
             selection == "all" -> all.filter { it.cat !in hidden }
             selection == "recent" -> all.filter { it.cat !in hidden }.sortedByDescending { it.added }.take(300)
             selection == "fav" -> { val byId = all.associateBy { it.id }; Repo.store.favoriteOrder(kind).mapNotNull { byId[it] } }
+            selection == "watched" -> { val byId = all.associateBy { it.id }; com.wm.iptv.ui.screens.watchedIds(kind).mapNotNull { byId[it] } }
             selection.startsWith("c:") -> all.filter { it.cat == selection.removePrefix("c:") }
             else -> all
         }
         val q = TextNorm.key(query)
         val f = if (q.isEmpty()) base else base.filter { TextNorm.matches(it.key, q) }
-        return if (selection == "recent" || selection == "fav") f
+        return if (selection == "recent" || selection == "fav" || selection == "watched") f
         else when (sort) {
             1 -> f.sortedBy { it.name.lowercase() }
             2 -> f.sortedByDescending { it.rating.toDoubleOrNull() ?: 0.0 }

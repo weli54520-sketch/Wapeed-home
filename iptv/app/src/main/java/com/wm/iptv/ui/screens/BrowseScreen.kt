@@ -59,6 +59,7 @@ private data class Item(val id: Int, val name: String, val image: String, val ra
 private const val SEL_ALL = "all"
 private const val SEL_RECENT = "recent"
 private const val SEL_FAV = "fav"
+private const val SEL_WATCHED = "watched"
 
 @Composable
 fun MoviesScreen(nav: Navigator) = BrowseScreen(nav, Kind.MOVIE)
@@ -95,7 +96,7 @@ private fun BrowseScreen(nav: Navigator, kind: Kind) {
     val hidden = remember(version) { Repo.store.hiddenCategories(kind) }
     val prog = remember(version) { if (isMovie) Repo.store.allProgress().associateBy { it.key } else emptyMap() }
 
-    val items: List<Item> = remember(all, selection, sort, query, favs, hidden) {
+    val items: List<Item> = remember(all, selection, sort, query, favs, hidden, if (selection == SEL_WATCHED) version else 0) {
         val base = when {
             selection == SEL_ALL -> all.filter { it.cat !in hidden }
             selection == SEL_RECENT -> all.filter { it.cat !in hidden }.sortedByDescending { it.added }.take(300)
@@ -104,12 +105,16 @@ private fun BrowseScreen(nav: Navigator, kind: Kind) {
                 val byId = all.associateBy { it.id }
                 order.mapNotNull { byId[it] }
             }
+            selection == SEL_WATCHED -> {
+                val byId = all.associateBy { it.id }
+                watchedIds(kind).mapNotNull { byId[it] }
+            }
             selection.startsWith("c:") -> all.filter { it.cat == selection.removePrefix("c:") }
             else -> all
         }
         val q = TextNorm.key(query)
         val filtered = if (q.isEmpty()) base else base.filter { TextNorm.matches(it.key, q) }
-        if (selection == SEL_RECENT || selection == SEL_FAV) filtered
+        if (selection == SEL_RECENT || selection == SEL_FAV || selection == SEL_WATCHED) filtered
         else when (sort) {
             1 -> filtered.sortedBy { it.name.lowercase() }
             2 -> filtered.sortedByDescending { it.rating.toDoubleOrNull() ?: 0.0 }
@@ -133,6 +138,7 @@ private fun BrowseScreen(nav: Navigator, kind: Kind) {
         selection == SEL_ALL -> "الكل"
         selection == SEL_RECENT -> "المضاف حديثاً"
         selection == SEL_FAV -> "المفضلة"
+        selection == SEL_WATCHED -> "آخر مشاهدة"
         else -> cats.firstOrNull { "c:${it.id}" == selection }?.name ?: ""
     }
 
@@ -155,6 +161,10 @@ private fun BrowseScreen(nav: Navigator, kind: Kind) {
                 item(key = "s_recent") {
                     SideItem("المضاف حديثاً", Modifier.track(mem, "s_$SEL_RECENT"), icon = Ico.Sparkle, selected = selection == SEL_RECENT,
                         onFocus = { if (it) pending = SEL_RECENT }, onClick = { selection = SEL_RECENT })
+                }
+                item(key = "s_watched") {
+                    SideItem("آخر مشاهدة", Modifier.track(mem, "s_$SEL_WATCHED"), icon = Ico.Clock, selected = selection == SEL_WATCHED,
+                        onFocus = { if (it) pending = SEL_WATCHED }, onClick = { selection = SEL_WATCHED })
                 }
                 item(key = "s_fav") {
                     SideItem("المفضلة", Modifier.track(mem, "s_$SEL_FAV"), icon = Ico.Star, selected = selection == SEL_FAV,
@@ -182,7 +192,7 @@ private fun BrowseScreen(nav: Navigator, kind: Kind) {
                     Spacer(Modifier.width(14.dp))
                     Text("${items.size} ${if (isMovie) "فيلم" else "مسلسل"}", fontSize = 14.sp, color = C.Muted)
                     Spacer(Modifier.weight(1f))
-                    if (selection != SEL_RECENT && selection != SEL_FAV) {
+                    if (selection != SEL_RECENT && selection != SEL_FAV && selection != SEL_WATCHED) {
                         Pill("الترتيب: " + when (sort) { 1 -> "الاسم"; 2 -> "التقييم"; else -> "الأحدث" },
                             onClick = { sort = (sort + 1) % 3 })
                         Spacer(Modifier.width(8.dp))
@@ -202,6 +212,7 @@ private fun BrowseScreen(nav: Navigator, kind: Kind) {
                                 catalog.isEmpty -> "جارٍ التحميل…"
                                 query.isNotEmpty() -> "ما لقينا شي باسم \"$query\" هنا"
                                 selection == SEL_FAV -> "اضغط مطوّلاً على أي ${if (isMovie) "فيلم" else "مسلسل"} عشان تضيفه للمفضلة"
+                                selection == SEL_WATCHED -> "ما شاهدت شي للحين"
                                 else -> "القائمة فاضية"
                             }, color = C.Text3, fontSize = 17.sp
                         )

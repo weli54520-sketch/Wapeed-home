@@ -46,6 +46,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -95,6 +96,7 @@ class PreviewController {
     fun stop() { player?.let { try { it.stop(); it.release() } catch (_: Exception) {} }; player = null }
 }
 
+@kotlin.OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun LiveScreen(nav: Navigator) {
     val catalog by Repo.catalog.collectAsState()
@@ -154,10 +156,15 @@ fun LiveScreen(nav: Navigator) {
 
     LaunchedEffect(Unit) {
         delay(60)
+        // نرجع لنفس القناة اللي كنت واقف عليها (وإذا ما فيه، آخر قناة شغلتها)
+        for (target in listOf(Repo.liveFocusId, Repo.store.lastChannel)) {
+            val idx = channels.indexOfFirst { it.id == target }
+            if (target != 0 && idx >= 0) {
+                list.scrollToItem((idx - 3).coerceAtLeast(0))
+                repeat(3) { delay(50); if (mem.focus("ch_$target")) return@LaunchedEffect }
+            }
+        }
         if (!mem.restore()) {
-            val last = Repo.store.lastChannel
-            val idx = channels.indexOfFirst { it.id == last }
-            if (idx >= 0) { list.scrollToItem((idx - 3).coerceAtLeast(0)); delay(50); if (mem.focus("ch_$last")) return@LaunchedEffect }
             if (!mem.focus("ch_first")) mem.focus("cat_$catKey")
         }
     }
@@ -200,7 +207,7 @@ fun LiveScreen(nav: Navigator) {
             Row(Modifier.fillMaxSize()) {
                 // ───── التصنيفات ─────
                 SmoothFocusScroll { LazyColumn(
-                    modifier = Modifier.width(230.dp).fillMaxHeight().background(C.Panel),
+                    modifier = Modifier.width(230.dp).fillMaxHeight().background(C.Panel).focusRestorer(),
                     contentPadding = PaddingValues(start = 14.dp, end = 10.dp, top = 14.dp, bottom = 40.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
@@ -242,12 +249,12 @@ fun LiveScreen(nav: Navigator) {
                             )
                         }
                     } else {
-                        SmoothFocusScroll { LazyColumn(state = list, contentPadding = PaddingValues(top = 4.dp, bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        SmoothFocusScroll { LazyColumn(state = list, modifier = Modifier.focusRestorer(), contentPadding = PaddingValues(top = 4.dp, bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             itemsIndexed(channels, key = { _, ch -> ch.id }) { i, ch ->
                                 ChannelRow(
                                     ch, ch.id in favs, if (epgFor == ch.id) epg.firstOrNull() else Repo.cachedEpg(ch.id)?.firstOrNull(),
                                     Modifier.track(mem, if (i == 0) "ch_first" else "ch_${ch.id}").let { m -> if (i == 0) m.track(mem, "ch_${ch.id}") else m },
-                                    onFocus = { if (it) focusedCh = ch },
+                                    onFocus = { if (it) { focusedCh = ch; Repo.liveFocusId = ch.id } },
                                     onClick = { open(ch) },
                                     onLong = {
                                         val added = Repo.toggleFavorite(Kind.LIVE, ch.id)

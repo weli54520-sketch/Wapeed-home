@@ -146,20 +146,19 @@ fun FocusBox(
     content: @Composable BoxScope.(focused: Boolean) -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) focusScale else 1f, tween(170), label = "s")
-    val lift by animateFloatAsState(if (focused) 1f else 0f, tween(170), label = "l")
+    // حركة واحدة بس (التكبير) وقصيرة. الظل والإطار يطلعون فقط لما يتحدد العنصر بدون أنيميشن
+    // عشان ما يتراكم حمل الرسم على أجهزة التلفزيون الضعيفة.
+    val scale by animateFloatAsState(if (focused) focusScale else 1f, tween(110), label = "s")
     Box(
         modifier
             .graphicsLayer { scaleX = scale; scaleY = scale }
-            .then(if (elevate) Modifier.shadow((22 * lift).dp, shape, clip = false, ambientColor = Color.Black, spotColor = Color.Black) else Modifier)
+            .then(if (elevate && focused) Modifier.shadow(14.dp, shape, clip = false, ambientColor = Color.Black, spotColor = Color.Black) else Modifier)
             .onFocusChanged { focused = it.isFocused; onFocus?.invoke(it.isFocused) }
             .onSelect(onClick, onLongClick)
             .clip(shape)
     ) {
         content(focused)
-        if (lift > 0.01f) {
-            Box(Modifier.matchParentSize().border(1.5.dp, Color.White.copy(alpha = 0.28f * lift), shape))
-        }
+        if (focused) Box(Modifier.matchParentSize().border(1.5.dp, Color.White.copy(alpha = 0.3f), shape))
     }
 }
 
@@ -181,7 +180,7 @@ fun Poster(
     Column(if (width == Dp.Unspecified) modifier.fillMaxWidth() else modifier.width(width), horizontalAlignment = Alignment.CenterHorizontally) {
         FocusBox(
             modifier = focusMod.fillMaxWidth().aspectRatio(2f / 3f),
-            onClick = onClick, onLongClick = onLongClick, focusScale = 1.1f,
+            onClick = onClick, onLongClick = onLongClick, focusScale = 1.07f,
             onFocus = { focused = it },
         ) {
             Art(image, seed, title)
@@ -409,26 +408,8 @@ fun TvRefreshButton(modifier: Modifier = Modifier) {
     }
 }
 
-// ───────────────────────── تمرير ناعم للقوائم ─────────────────────────
+// ───────────────────────── تمرير القوائم ─────────────────────────
 
-/**
- * يخلي العنصر المحدد ثابت في نفس المكان تقريباً (pivot) والقائمة هي اللي تتحرك بنعومة،
- * بدل ما تقفز القائمة لما يوصل التركيز لطرف الشاشة.
- */
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
-private class PivotSpec(private val pivot: Float) : androidx.compose.foundation.gestures.BringIntoViewSpec {
-    override val scrollAnimationSpec: androidx.compose.animation.core.AnimationSpec<Float> =
-        tween(durationMillis = 220, easing = androidx.compose.animation.core.FastOutSlowInEasing)
-
-    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
-        if (size >= containerSize) return offset
-        return offset - (containerSize * pivot - size / 2f)
-    }
-}
-
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+/** التمرير الافتراضي (سريع وخفيف). تركناها غلاف فاضي عشان ما نلمس كل الاستخدامات. */
 @Composable
-fun SmoothFocusScroll(pivot: Float = 0.38f, content: @Composable () -> Unit) {
-    val spec = remember(pivot) { PivotSpec(pivot) }
-    androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides spec) { content() }
-}
+fun SmoothFocusScroll(pivot: Float = 0.38f, content: @Composable () -> Unit) { content() }
