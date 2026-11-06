@@ -1,10 +1,6 @@
 package com.wm.iptv.mobile
 
-import android.content.Context
-import android.view.Surface
-import android.view.WindowManager
 import android.widget.Toast
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -290,19 +286,15 @@ fun MLiveScreen(nav: Navigator) {
     }
     val current = dock.channel
 
-    // دوران الجهاز الفعلي (مو أبعاد النافذة): الفولد المفتوح شاشته شبه مربعة فالأبعاد تضلل
-    val cfg = LocalConfiguration.current
-    val rotated = remember(cfg) {
-        @Suppress("DEPRECATION")
-        val r = (ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay.rotation
-        r == Surface.ROTATION_90 || r == Surface.ROTATION_270
-    }
     val splitMode = Repo.store.liveSplit
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val screenW = maxWidth
-        // لما تلف الجهاز بالعرض: المشغل بجنب القائمة بدل ما يغطيها (ويمكن تغييرها من الإعدادات)
-        val wide = screenW >= 480.dp && when (splitMode) { 1 -> true; 2 -> false; else -> rotated }
+        val screenH = maxHeight
+        // القاعدة ما تعتمد على اتجاه الجهاز (الفولد يضلل): لو المشغل 16:9 فوق القائمة ياخذ أكثر من 60% من
+        // الارتفاع يعني ما يبقى مكان للقائمة، فنقسم الشاشة. لو الشاشة طويلة يبقى المشغل فوق والقائمة تحت.
+        val playerFitsOnTop = screenW * (9f / 16f) <= screenH * 0.6f
+        val wide = screenW >= 480.dp && when (splitMode) { 1 -> true; 2 -> false; else -> !playerFitsOnTop }
         // بالطول (جوال أو فولد): المشغل مثبّت فوق القائمة، مثل ما كان
         val docked = current != null && !wide
 
