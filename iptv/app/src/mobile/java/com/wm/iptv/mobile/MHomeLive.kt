@@ -288,7 +288,8 @@ fun MLiveScreen(nav: Navigator) {
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         // شاشة عريضة (فولد مفتوح، تابلت، أو جوال بالعرض): المشغل بجنب القائمة بدل ما يغطيها
-        val wide = maxWidth >= 600.dp
+        val screenW = maxWidth
+        val wide = screenW >= 600.dp
         // جوال بالطول: المشغل مثبّت فوق القائمة
         val docked = current != null && !wide
 
@@ -346,7 +347,7 @@ fun MLiveScreen(nav: Navigator) {
 
         if (wide) {
             Row(Modifier.fillMaxSize()) {
-                Column(Modifier.width((maxWidth * 0.42f).coerceIn(300.dp, 400.dp)).fillMaxHeight()) {
+                Column(Modifier.width((screenW * 0.42f).coerceIn(300.dp, 400.dp)).fillMaxHeight()) {
                     MHeader("المباشر") { MRefreshButton(); MIconButton(if (searching) Ico.Close else Ico.Search, "بحث") { searching = !searching; if (!searching) query = "" } }
                     listPane()
                 }
