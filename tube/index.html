@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0b10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>تيوبي</title>
+<style>
+:root{--bg:#0b0b10;--card:#16161e;--txt:#f3f3f7;--mut:#9a9aab;--acc:#ff4d5e;--glass:rgba(30,30,40,.55);--line:rgba(255,255,255,.1)}
+body.light{--bg:#f4f4f8;--card:#fff;--txt:#14141a;--mut:#6b6b7a;--glass:rgba(255,255,255,.6);--line:rgba(0,0,0,.1)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif}
+button,input{font:inherit;color:inherit}
+header{position:sticky;top:0;z-index:5;padding:max(12px,env(safe-area-inset-top)) 16px 10px;background:linear-gradient(var(--bg) 70%,transparent);display:flex;align-items:center;gap:10px}
+header h1{font-size:20px;margin:0;flex:1}
+.av{width:34px;height:34px;border-radius:50%;background:var(--card);object-fit:cover;border:1px solid var(--line)}
+main{padding:0 14px 140px;max-width:1200px;margin:auto}
+.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(250px,1fr))}
+.card{background:var(--card);border-radius:18px;overflow:hidden;cursor:pointer;border:1px solid var(--line)}
+.th{position:relative;aspect-ratio:16/9;background:#222}
+.th img{width:100%;height:100%;object-fit:cover;display:block}
+.dur{position:absolute;bottom:6px;left:6px;background:rgba(0,0,0,.75);color:#fff;font-size:12px;padding:2px 6px;border-radius:6px}
+.meta{padding:10px 12px 12px}
+.meta b{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:15px;line-height:1.4}
+.meta small{color:var(--mut);display:block;margin-top:4px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:14px}
+input[type=text],input[type=search],input[type=password]{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:6px 0 10px;direction:ltr;text-align:left}
+input.ar{direction:rtl;text-align:right}
+.btn{background:var(--acc);color:#fff;border:0;border-radius:14px;padding:11px 16px;cursor:pointer}
+.btn.sec{background:var(--bg);color:var(--txt);border:1px solid var(--line)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.acc{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+.acc:last-child{border:0}.acc .n{flex:1}.acc.on .n b::after{content:" ✓";color:var(--acc)}
+h2{font-size:16px;margin:18px 2px 10px;color:var(--mut)}
+.mut{color:var(--mut);font-size:14px;line-height:1.7}
+/* floating glass bar */
+nav{position:fixed;left:50%;bottom:max(14px,env(safe-area-inset-bottom));transform:translate(-50%,0);z-index:20;display:flex;gap:4px;padding:8px;border-radius:30px;background:var(--glass);backdrop-filter:blur(18px) saturate(1.6);-webkit-backdrop-filter:blur(18px) saturate(1.6);border:1px solid var(--line);box-shadow:0 10px 30px rgba(0,0,0,.35);transition:transform .35s cubic-bezier(.3,.9,.3,1),opacity .35s}
+nav.hide{transform:translate(-50%,140%);opacity:0;pointer-events:none}
+nav button{background:none;border:0;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 16px;border-radius:22px;color:var(--mut);font-size:11px;cursor:pointer;min-width:66px}
+nav button svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+nav button.on{color:var(--txt);background:rgba(255,255,255,.14)}
+body.light nav button.on{background:rgba(0,0,0,.08)}
+/* watch */
+#watch{position:fixed;inset:0;z-index:30;background:var(--bg);display:none;flex-direction:column;overflow:auto}
+#watch.open{display:flex}
+.pl{position:sticky;top:0;background:#000;aspect-ratio:16/9;width:100%;z-index:2}
+.pl iframe{width:100%;height:100%;border:0}
+.wb{padding:12px 14px}
+.wb h3{margin:0 0 6px;font-size:17px;line-height:1.5}
+.wl{padding:0 14px 40px}
+.wl .grid{grid-template-columns:1fr}
+@media(min-width:700px){
+  #watch{flex-direction:row;align-items:flex-start}
+  .wl,.wmain{overflow:auto;max-height:100vh}
+  .wmain{flex:1.6;min-width:0}.wl{flex:1;padding-top:14px}
+  .pl{position:static;border-radius:0 0 18px 18px;overflow:hidden}
+}
+.toast{position:fixed;top:14px;left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--line);padding:10px 16px;border-radius:14px;z-index:50;font-size:14px}
+.empty{text-align:center;color:var(--mut);padding:40px 10px;line-height:1.8}
+</style>
+</head>
+<body>
+<header><h1 id="title">تيوبي</h1><img class="av" id="hav" alt=""></header>
+<main id="app"></main>
+
+<nav id="bar">
+  <button data-t="home"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>الرئيسية</button>
+  <button data-t="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>بحث</button>
+  <button data-t="lib"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5v5l4.5-2.5z"/></svg>مكتبتي</button>
+  <button data-t="acc"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/></svg>حسابي</button>
+</nav>
+
+<div id="watch">
+  <div class="wmain">
+    <div class="pl" id="pl"></div>
+    <div class="wb"><h3 id="wt"></h3><div class="mut" id="wc"></div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn" id="wlater">حفظ للمشاهدة لاحقاً</button>
+        <button class="btn sec" id="wyt">فتح في يوتيوب</button>
+        <button class="btn sec" id="wclose">إغلاق</button>
+      </div>
+    </div>
+  </div>
+  <div class="wl"><div class="grid" id="wlist"></div></div>
+</div>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+const $=s=>document.querySelector(s), app=$('#app');
+const ld=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch(e){return d}};
+const sv=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
+let cfg=ld('tube_cfg',{}), accs=ld('tube_accs',[]), active=ld('tube_active',null), later=ld('tube_later',[]), tab='home', cur=[];
+if(ld('tube_theme','dark')==='light')document.body.classList.add('light');
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const acc=()=>accs.find(a=>a.id===active);
+function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),3200)}
+
+/* ---------- API ---------- */
+async function token(a){
+  if(a.exp>Date.now()+60000) return a.token;
+  return new Promise((res,rej)=>{
+    if(!window.google||!cfg.clientId) return rej(new Error('no client'));
+    const c=google.accounts.oauth2.initTokenClient({client_id:cfg.clientId,scope:SCOPE,login_hint:a.email,prompt:'',
+      callback:r=>{ if(r.error) return rej(new Error(r.error)); a.token=r.access_token;a.exp=Date.now()+r.expires_in*1000;sv('tube_accs',accs);res(a.token)},
+      error_callback:()=>rej(new Error('expired'))});
+    c.requestAccessToken();
+  });
+}
+const SCOPE='https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
+async function api(path,params={},auth=false){
+  const q=new URLSearchParams(params), h={};
+  if(auth){const a=acc(); if(!a) throw new Error('login'); h.Authorization='Bearer '+await token(a)} else {if(!cfg.apiKey) throw new Error('key'); q.set('key',cfg.apiKey)}
+  const r=await fetch('https://www.googleapis.com/youtube/v3/'+path+'?'+q,{headers:h});
+  const j=await r.json(); if(!r.ok) throw new Error(j.error?.message||'خطأ');
+  return j;
+}
+function dur(iso){const m=/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/.exec(iso||'');if(!m)return'';const[h,mi,s]=[m[1]|0,m[2]|0,m[3]|0];return h?`${h}:${String(mi).padStart(2,'0')}:${String(s).padStart(2,'0')}`:`${mi}:${String(s).padStart(2,'0')}`}
+function ago(d){const s=(Date.now()-new Date(d))/1000;for(const[u,n]of[['سنة',31536e3],['شهر',2592e3],['يوم',86400],['ساعة',3600],['دقيقة',60]])if(s>=n)return'قبل '+Math.floor(s/n)+' '+u;return'الآن'}
+function num(n){n=+n;return n>=1e6?(n/1e6).toFixed(1)+' مليون':n>=1e3?(n/1e3).toFixed(1)+' ألف':n}
+async function hydrate(ids){
+  ids=[...new Set(ids)].filter(Boolean); const out=[];
+  for(let i=0;i<ids.length;i+=50){
+    const j=await api('videos',{part:'snippet,contentDetails,statistics',id:ids.slice(i,i+50).join(',')},!!acc());
+    out.push(...j.items.map(v=>({id:v.id,title:v.snippet.title,ch:v.snippet.channelTitle,date:v.snippet.publishedAt,thumb:(v.snippet.thumbnails.medium||v.snippet.thumbnails.default).url,dur:dur(v.contentDetails.duration),views:v.statistics.viewCount})));
+  }
+  const order=Object.fromEntries(ids.map((x,i)=>[x,i])); return out.sort((a,b)=>order[a.id]-order[b.id]);
+}
+
+/* ---------- views ---------- */
+function cards(list){
+  cur=list;
+  if(!list.length) return '<div class="empty">ما فيه شي هنا بعد.</div>';
+  return '<div class="grid">'+list.map((v,i)=>`<div class="card" data-i="${i}"><div class="th"><img loading="lazy" src="${esc(v.thumb)}" alt="">${v.dur?`<span class="dur">${v.dur}</span>`:''}</div><div class="meta"><b>${esc(v.title)}</b><small>${esc(v.ch)}${v.views?' · '+num(v.views)+' مشاهدة':''}${v.date?' · '+ago(v.date):''}</small></div></div>`).join('')+'</div>';
+}
+function bindCards(root=app){root.querySelectorAll('.card').forEach(c=>c.onclick=()=>openWatch(cur[c.dataset.i]))}
+function loading(){app.innerHTML='<div class="empty">جاري التحميل…</div>'}
+function fail(e){
+  const m={key:'أضف مفتاح API من صفحة حسابي أولاً.',login:'سجّل الدخول بحساب قوقل من صفحة حسابي.','no client':'أضف Client ID من صفحة حسابي.',expired:'انتهت الجلسة، سجّل الدخول من جديد من صفحة حسابي.'}[e.message]||e.message;
+  app.innerHTML=`<div class="empty">${esc(m)}</div>`;
+}
+
+async function home(){
+  loading();
+  try{
+    if(!acc()){ const j=await api('videos',{part:'snippet',chart:'mostPopular',regionCode:'SA',maxResults:24});
+      app.innerHTML='<h2>الأكثر رواجاً (سجّل دخولك لعرض اشتراكاتك)</h2>'+cards(await hydrate(j.items.map(x=>x.id))); return bindCards(); }
+    const subs=await api('subscriptions',{part:'snippet',mine:'true',maxResults:50,order:'alphabetical'},true);
+    const chs=subs.items.map(s=>s.snippet.resourceId.channelId).slice(0,30);
+    const ups=await Promise.all(chs.map(c=>api('playlistItems',{part:'contentDetails',playlistId:'UU'+c.slice(2),maxResults:3},true).catch(()=>({items:[]}))));
+    const items=ups.flatMap(u=>u.items).sort((a,b)=>new Date(b.contentDetails.videoPublishedAt)-new Date(a.contentDetails.videoPublishedAt)).slice(0,40);
+    app.innerHTML='<h2>آخر فيديوهات اشتراكاتك</h2>'+cards(await hydrate(items.map(i=>i.contentDetails.videoId))); bindCards();
+  }catch(e){fail(e)}
+}
+function search(){
+  app.innerHTML='<form id="sf"><input class="ar" type="search" id="q" placeholder="ابحث في يوتيوب…" autocomplete="off"></form><div id="res"></div>';
+  $('#sf').onsubmit=async e=>{e.preventDefault();const q=$('#q').value.trim();if(!q)return;$('#res').innerHTML='<div class="empty">جاري البحث…</div>';
+    try{const j=await api('search',{part:'snippet',q,type:'video',maxResults:24,safeSearch:'moderate'},false);
+      $('#res').innerHTML=cards(await hydrate(j.items.map(x=>x.id.videoId)));bindCards($('#res'))}catch(e){$('#res').innerHTML=`<div class="empty">${esc(e.message==='key'?'أضف مفتاح API من صفحة حسابي.':e.message)}</div>`}};
+  $('#q').focus();
+}
+async function renderLib(){
+  const sections=[{t:'للمشاهدة لاحقاً (محفوظ عندك)',list:later}];
+  if(acc()){
+    try{const liked=await api('playlistItems',{part:'contentDetails',playlistId:'LL',maxResults:24},true);sections.push({t:'الفيديوهات اللي أعجبتك',list:await hydrate(liked.items.map(i=>i.contentDetails.videoId))});}catch(e){sections.push({t:'الإعجابات',err:e.message})}
+  }
+  app.innerHTML='';
+  sections.forEach(s=>{const d=document.createElement('div');d.innerHTML=`<h2>${s.t}</h2>`+(s.err?`<div class="empty">${esc(s.err)}</div>`:cards(s.list));app.appendChild(d);const l=s.list;d.querySelectorAll('.card').forEach(c=>c.onclick=()=>{cur=l;openWatch(l[c.dataset.i])})});
+  if(acc()){
+    try{const pls=await api('playlists',{part:'snippet,contentDetails',mine:'true',maxResults:30},true);
+      const d=document.createElement('div');d.innerHTML='<h2>قوائم التشغيل</h2><div class="box">'+(pls.items.map(p=>`<div class="acc" data-id="${p.id}" style="cursor:pointer"><div class="n"><b>${esc(p.snippet.title)}</b><div class="mut">${p.contentDetails.itemCount} فيديو</div></div></div>`).join('')||'<div class="mut">لا توجد قوائم.</div>')+'</div>';app.appendChild(d);
+      d.querySelectorAll('[data-id]').forEach(el=>el.onclick=async()=>{loading();try{const j=await api('playlistItems',{part:'contentDetails',playlistId:el.dataset.id,maxResults:40},true);app.innerHTML='<h2>القائمة</h2>'+cards(await hydrate(j.items.map(i=>i.contentDetails.videoId)));bindCards()}catch(e){fail(e)}});
+    }catch(e){}
+  } else {const d=document.createElement('div');d.innerHTML='<div class="empty">سجّل الدخول لعرض إعجاباتك وقوائمك.</div>';app.appendChild(d)}
+}
+function accounts(){
+  app.innerHTML=`
+  <div class="box"><b>الحسابات</b>${accs.map(a=>`<div class="acc ${a.id===active?'on':''}"><img class="av" src="${esc(a.pic||'')}" alt=""><div class="n" data-sw="${a.id}" style="cursor:pointer"><b>${esc(a.name)}</b><div class="mut" style="direction:ltr;text-align:right">${esc(a.email||'')}</div></div><button class="btn sec" data-out="${a.id}">خروج</button></div>`).join('')||'<div class="mut" style="margin:8px 0">ما سجلت دخول بعد.</div>'}
+    <div class="row" style="margin-top:12px"><button class="btn" id="add">+ إضافة حساب قوقل</button></div></div>
+  <div class="box"><b>الإعدادات</b>
+    <div class="mut">Client ID (لتسجيل الدخول)</div><input type="text" id="cid" value="${esc(cfg.clientId||'')}" placeholder="xxxx.apps.googleusercontent.com">
+    <div class="mut">مفتاح API (للبحث والتصفح)</div><input type="password" id="key" value="${esc(cfg.apiKey||'')}" placeholder="AIza…">
+    <div class="row"><button class="btn" id="save">حفظ</button><button class="btn sec" id="theme">تبديل الثيم</button></div>
+    <p class="mut">كل شي محفوظ في متصفحك فقط. التطبيق يطلب صلاحية القراءة فقط ولا يقدر يغيّر شي في حسابك.</p></div>`;
+  $('#save').onclick=()=>{cfg={clientId:$('#cid').value.trim(),apiKey:$('#key').value.trim()};sv('tube_cfg',cfg);toast('تم الحفظ')};
+  $('#theme').onclick=()=>{const l=document.body.classList.toggle('light');sv('tube_theme',l?'light':'dark')};
+  $('#add').onclick=()=>{cfg={clientId:$('#cid').value.trim(),apiKey:$('#key').value.trim()};sv('tube_cfg',cfg);addAccount()};
+  app.querySelectorAll('[data-sw]').forEach(e=>e.onclick=()=>{active=e.dataset.sw;sv('tube_active',active);paintHeader();accounts();toast('تم تبديل الحساب')});
+  app.querySelectorAll('[data-out]').forEach(e=>e.onclick=()=>{const a=accs.find(x=>x.id===e.dataset.out);if(a?.token&&window.google)google.accounts.oauth2.revoke(a.token,()=>{});accs=accs.filter(x=>x!==a);if(active===a.id)active=accs[0]?.id||null;sv('tube_accs',accs);sv('tube_active',active);paintHeader();accounts()});
+}
+function addAccount(){
+  if(!cfg.clientId) return toast('أضف Client ID أولاً');
+  if(!window.google) return toast('مكتبة قوقل لم تُحمَّل بعد، حاول مرة ثانية');
+  const c=google.accounts.oauth2.initTokenClient({client_id:cfg.clientId,scope:SCOPE,prompt:'select_account',
+    callback:async r=>{ if(r.error) return toast('فشل تسجيل الدخول');
+      try{
+        const u=await (await fetch('https://www.googleapis.com/oauth2/v3/userinfo',{headers:{Authorization:'Bearer '+r.access_token}})).json();
+        let a=accs.find(x=>x.id===u.sub); const d={id:u.sub,name:u.name,email:u.email,pic:u.picture,token:r.access_token,exp:Date.now()+r.expires_in*1000};
+        if(a)Object.assign(a,d); else accs.push(d);
+        active=u.sub; sv('tube_accs',accs); sv('tube_active',active); paintHeader(); accounts(); toast('أهلاً '+u.name);
+      }catch(e){toast('تعذّر جلب بيانات الحساب')} }});
+  c.requestAccessToken();
+}
+function paintHeader(){const a=acc();$('#hav').src=a?.pic||'data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34"><rect width="34" height="34" fill="#444"/></svg>');$('#hav').onclick=()=>go('acc')}
+
+/* ---------- watch ---------- */
+let wv=null;
+function openWatch(v){
+  if(!v)return; wv=v;
+  $('#pl').innerHTML=`<iframe src="https://www.youtube.com/embed/${encodeURIComponent(v.id)}?autoplay=1&playsinline=1&rel=0" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>`;
+  $('#wt').textContent=v.title; $('#wc').textContent=v.ch;
+  $('#wlist').innerHTML=cards(cur).replace('<div class="grid">','').replace(/<\/div>$/,'');
+  $('#wlist').querySelectorAll('.card').forEach(c=>c.onclick=()=>openWatch(cur[c.dataset.i]));
+  $('#watch').classList.add('open'); $('#watch').scrollTop=0; $('#bar').classList.add('hide');
+}
+$('#wclose').onclick=()=>{$('#watch').classList.remove('open');$('#pl').innerHTML='';showBar()};
+$('#wyt').onclick=()=>wv&&window.open('https://www.youtube.com/watch?v='+wv.id,'_blank');
+$('#wlater').onclick=()=>{if(!wv)return;if(!later.find(x=>x.id===wv.id)){later.unshift(wv);sv('tube_later',later);toast('انحفظ للمشاهدة لاحقاً')}else toast('محفوظ من قبل')};
+
+/* ---------- nav + floating bar ---------- */
+function go(t){tab=t;document.querySelectorAll('#bar button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
+  $('#title').textContent={home:'الرئيسية',search:'بحث',lib:'مكتبتي',acc:'حسابي'}[t]; window.scrollTo(0,0);
+  ({home,search,lib:renderLib,acc:accounts})[t]();}
+document.querySelectorAll('#bar button').forEach(b=>b.onclick=()=>go(b.dataset.t));
+let hideT; const bar=$('#bar');
+function showBar(){bar.classList.remove('hide');clearTimeout(hideT);hideT=setTimeout(()=>{if(!$('#watch').classList.contains('open')&&document.activeElement.tagName!=='INPUT')bar.classList.add('hide')},2500)}
+['scroll','touchstart','pointermove','keydown'].forEach(e=>addEventListener(e,showBar,{passive:true}));
+paintHeader(); go(cfg.apiKey||acc()?'home':'acc'); showBar();
+if(!cfg.apiKey&&!acc()) toast('ابدأ بإضافة مفتاح API من الإعدادات');
+</script>
+</body>
+</html>
