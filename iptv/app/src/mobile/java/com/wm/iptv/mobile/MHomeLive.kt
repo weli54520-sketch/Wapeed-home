@@ -287,10 +287,10 @@ fun MLiveScreen(nav: Navigator) {
     val current = dock.channel
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        // شاشة عريضة (فولد مفتوح، تابلت، أو جوال بالعرض): المشغل بجنب القائمة بدل ما يغطيها
+        // الشاشة بالعرض (عرضها أكبر من ارتفاعها): المشغل بجنب القائمة بدل ما يغطيها
         val screenW = maxWidth
-        val wide = screenW >= 600.dp
-        // جوال بالطول: المشغل مثبّت فوق القائمة
+        val wide = screenW > maxHeight && screenW >= 480.dp
+        // بالطول (جوال أو فولد): المشغل مثبّت فوق القائمة، مثل ما كان
         val docked = current != null && !wide
 
         val listPane: @Composable ColumnScope.() -> Unit = {
