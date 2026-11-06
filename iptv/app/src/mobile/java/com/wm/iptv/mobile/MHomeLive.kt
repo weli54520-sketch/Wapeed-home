@@ -1,7 +1,11 @@
 package com.wm.iptv.mobile
 
 import android.widget.Toast
-import android.content.res.Configuration
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import android.view.ViewGroup
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
@@ -12,7 +16,6 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
@@ -198,8 +201,6 @@ private class LiveDock {
     var error by mutableStateOf(false)
     /** القناة اللي نرجع نشغلها لما نرجع من ملء الشاشة أو من الخلفية */
     var resumeId = 0
-    /** متى رجعنا للشاشة (عشان لفّة الجوال وقت الرجوع من ملء الشاشة ما تفتحه مرة ثانية) */
-    var startedAt = 0L
 
     private val listener = object : Player.Listener {
         override fun onPlaybackStateChanged(state: Int) { buffering = state == Player.STATE_BUFFERING }
@@ -266,7 +267,6 @@ fun MLiveScreen(nav: Navigator) {
             when (e) {
                 Lifecycle.Event.ON_STOP -> { dock.channel?.let { if (dock.player != null) dock.resumeId = it.id }; dock.release() }
                 Lifecycle.Event.ON_START -> if (dock.resumeId != 0) {
-                    dock.startedAt = System.currentTimeMillis()
                     // لو قلّبت قنوات في ملء الشاشة نكمل على آخر قناة شفتها
                     val c = Repo.catalog.value
                     val ch = c.channelById[Repo.store.lastChannel] ?: c.channelById[dock.resumeId]
@@ -280,44 +280,34 @@ fun MLiveScreen(nav: Navigator) {
         onDispose { owner.lifecycle.removeObserver(obs); dock.close() }
     }
 
-    // لفّ الجوال بالعرض والقناة شغالة = ملء الشاشة
-    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    LaunchedEffect(landscape) {
-        val ch = dock.channel
-        if (landscape && ch != null && dock.player != null && System.currentTimeMillis() - dock.startedAt > 2000 &&
-            owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) fullscreen(ch)
-    }
-
     val catTitle = when {
         catKey == LiveKeys.FAV -> "المفضلة"; catKey == LiveKeys.RECENT -> "آخر المشاهدة"; catKey == LiveKeys.ALL -> "الكل"
         else -> cats.firstOrNull { LiveKeys.cat(it.id) == catKey }?.name ?: "تصنيف"
     }
     val current = dock.channel
 
-    Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize()) {
-            AnimatedVisibility(current != null, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
-                val ch = current ?: dock.channel
-                if (ch != null) LiveDockView(dock, ch, onFullscreen = { fullscreen(ch) }, onClose = { dock.close() })
-            }
-            if (current == null) {
-                MHeader("المباشر") { MRefreshButton(); MIconButton(if (searching) Ico.Close else Ico.Search, "بحث") { searching = !searching; if (!searching) query = "" } }
-            }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        // شاشة عريضة (فولد مفتوح، تابلت، أو جوال بالعرض): المشغل بجنب القائمة بدل ما يغطيها
+        val wide = maxWidth >= 600.dp
+        // جوال بالطول: المشغل مثبّت فوق القائمة
+        val docked = current != null && !wide
+
+        val listPane: @Composable ColumnScope.() -> Unit = {
             if (searching) {
-                Row(Modifier.padding(top = if (current != null) 8.dp else 0.dp), verticalAlignment = Alignment.CenterVertically) {
-                    MField(query, { query = it }, "ابحث عن قناة", Modifier.weight(1f).padding(start = 18.dp, end = if (current != null) 4.dp else 18.dp, top = 4.dp, bottom = 4.dp),
+                Row(Modifier.padding(top = if (docked) 8.dp else 0.dp), verticalAlignment = Alignment.CenterVertically) {
+                    MField(query, { query = it }, "ابحث عن قناة", Modifier.weight(1f).padding(start = 18.dp, end = if (docked) 4.dp else 18.dp, top = 4.dp, bottom = 4.dp),
                         autoFocus = true, leading = Ico.Search)
-                    if (current != null) MIconButton(Ico.Close, "إغلاق البحث", Modifier.padding(end = 8.dp)) { searching = false; query = "" }
+                    if (docked) MIconButton(Ico.Close, "إغلاق البحث", Modifier.padding(end = 8.dp)) { searching = false; query = "" }
                 }
             } else {
-                Row(Modifier.fillMaxWidth().padding(top = if (current != null) 4.dp else 0.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().padding(top = if (docked) 4.dp else 0.dp), verticalAlignment = Alignment.CenterVertically) {
                     MChips(
                         listOf(LiveKeys.FAV to "المفضلة", LiveKeys.RECENT to "آخر المشاهدة", LiveKeys.ALL to "الكل") +
                             (if (catKey.startsWith("c:")) listOf(catKey to catTitle) else emptyList()) +
                             listOf("pick" to "التصنيفات ▾"),
                         catKey, Modifier.weight(1f),
                     ) { if (it == "pick") showSheet = true else catKey = it }
-                    if (current != null) MIconButton(Ico.Search, "بحث", Modifier.padding(end = 6.dp)) { searching = true }
+                    if (docked) MIconButton(Ico.Search, "بحث", Modifier.padding(end = 6.dp)) { searching = true }
                 }
             }
             if (channels.isEmpty()) {
@@ -331,7 +321,8 @@ fun MLiveScreen(nav: Navigator) {
             } else {
                 LazyColumn(state = list, contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 20.dp + LocalBarSpace.current)) {
                     if (current == null && Repo.store.livePreview) item {
-                        Text("اضغط على القناة تشتغل فوق والقائمة تبقى، واضغطها مرة ثانية لملء الشاشة",
+                        Text(if (wide) "اضغط على القناة تشتغل بجنب القائمة، وكبّرها بزر التكبير"
+                             else "اضغط على القناة تشتغل فوق والقائمة تبقى، واضغطها مرة ثانية لملء الشاشة",
                             fontSize = 12.sp, color = C.Dim, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
                     }
                     items(channels, key = { it.id }) { ch ->
@@ -339,7 +330,8 @@ fun MLiveScreen(nav: Navigator) {
                             onClick = {
                                 when {
                                     !Repo.store.livePreview -> PlayerLauncher.live(ctx, ch.id, listKey)
-                                    ch.id == dock.channel?.id -> fullscreen(ch)
+                                    // الشاشة العريضة: التكبير بزر التكبير بس (ما يصير بالغلط)
+                                    ch.id == dock.channel?.id -> if (!wide) fullscreen(ch)
                                     else -> dock.play(ctx, ch)
                                 }
                             },
@@ -351,6 +343,29 @@ fun MLiveScreen(nav: Navigator) {
                 }
             }
         }
+
+        if (wide) {
+            Row(Modifier.fillMaxSize()) {
+                Column(Modifier.width((maxWidth * 0.42f).coerceIn(300.dp, 400.dp)).fillMaxHeight()) {
+                    MHeader("المباشر") { MRefreshButton(); MIconButton(if (searching) Ico.Close else Ico.Search, "بحث") { searching = !searching; if (!searching) query = "" } }
+                    listPane()
+                }
+                Box(Modifier.weight(1f).fillMaxHeight().padding(start = 4.dp, end = 16.dp, top = 14.dp, bottom = 12.dp + LocalBarSpace.current)) {
+                    LivePane(dock, current, onFullscreen = { current?.let { fullscreen(it) } }, onClose = { dock.close() })
+                }
+            }
+        } else {
+            Column(Modifier.fillMaxSize()) {
+                AnimatedVisibility(current != null, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+                    val ch = current ?: dock.channel
+                    if (ch != null) LiveDockView(dock, ch, onFullscreen = { fullscreen(ch) }, onClose = { dock.close() })
+                }
+                if (current == null) {
+                    MHeader("المباشر") { MRefreshButton(); MIconButton(if (searching) Ico.Close else Ico.Search, "بحث") { searching = !searching; if (!searching) query = "" } }
+                }
+                listPane()
+            }
+        }
         if (showSheet) {
             MSheet("تصنيفات القنوات", cats.map { LiveKeys.cat(it.id) to it.name }, catKey,
                 onPick = { catKey = it; showSheet = false }, onDismiss = { showSheet = false })
@@ -358,14 +373,64 @@ fun MLiveScreen(nav: Navigator) {
     }
 }
 
+/** الجانب اللي فيه المشغل في الشاشة العريضة: الفيديو + اسم القناة + دليل البرامج */
+@Composable
+private fun LivePane(dock: LiveDock, ch: Channel?, onFullscreen: () -> Unit, onClose: () -> Unit) {
+    if (ch == null) {
+        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            Icon(Ico.Tv, null, tint = C.Dim, modifier = Modifier.size(52.dp))
+            Spacer(Modifier.height(12.dp))
+            Text("اختر قناة وتشتغل هنا", fontSize = 16.sp, color = C.Text3, fontWeight = FontWeight.SemiBold)
+            Text("وتكبّرها بزر التكبير متى ما تبي", fontSize = 13.sp, color = C.Muted)
+        }
+        return
+    }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        LiveDockView(dock, ch, onFullscreen, onClose, Modifier.clip(RoundedCornerShape(18.dp)), tapFullscreen = false)
+        EpgBlock(ch)
+    }
+}
+
+@Composable
+private fun EpgBlock(ch: Channel) {
+    var epg by remember(ch.id) { mutableStateOf(Repo.cachedEpg(ch.id) ?: emptyList()) }
+    LaunchedEffect(ch.id) { epg = Repo.epg(ch.id) }
+    val nowMs = System.currentTimeMillis()
+    val now = epg.firstOrNull { it.start <= nowMs && it.end > nowMs }
+    val next = epg.filter { it.start > nowMs }.take(3)
+    Column(Modifier.padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("${ch.num}  ·  ${ch.name}", fontSize = 13.sp, color = C.Text3, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (now != null) {
+            Text("يعرض الآن · ${clockText(now.start)} – ${clockText(now.end)}", fontSize = 12.sp, color = C.Accent, fontWeight = FontWeight.SemiBold)
+            Text(now.title, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            ProgressLine(((nowMs - now.start).toFloat() / (now.end - now.start)).coerceIn(0f, 1f), Modifier.padding(vertical = 4.dp), height = 3.dp)
+            if (now.description.isNotBlank()) Text(now.description, fontSize = 13.sp, color = C.Text3, lineHeight = 21.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        } else {
+            Text("لا يوجد دليل برامج لهذي القناة", fontSize = 14.sp, color = C.Muted)
+        }
+        if (next.isNotEmpty()) {
+            Text("التالي", fontSize = 12.sp, color = C.Muted, modifier = Modifier.padding(top = 10.dp))
+            next.forEach { e ->
+                Row(Modifier.padding(vertical = 3.dp)) {
+                    Text(clockText(e.start), fontSize = 13.sp, color = C.Muted, modifier = Modifier.width(72.dp))
+                    Text(e.title, fontSize = 13.sp, color = C.Text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
 @OptIn(UnstableApi::class)
 @Composable
-private fun LiveDockView(dock: LiveDock, ch: Channel, onFullscreen: () -> Unit, onClose: () -> Unit) {
+private fun LiveDockView(
+    dock: LiveDock, ch: Channel, onFullscreen: () -> Unit, onClose: () -> Unit,
+    modifier: Modifier = Modifier, tapFullscreen: Boolean = true,
+) {
     val ctx = LocalContext.current
     var now by remember(ch.id) { mutableStateOf<EpgEntry?>(Repo.cachedEpg(ch.id)?.firstOrNull { it.start <= System.currentTimeMillis() }) }
     LaunchedEffect(ch.id) { now = Repo.epg(ch.id).firstOrNull { it.start <= System.currentTimeMillis() && it.end > System.currentTimeMillis() } }
 
-    Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black).plainClick { if (dock.error) dock.retry(ctx) else onFullscreen() }) {
+    Box(modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black).plainClick { if (dock.error) dock.retry(ctx) else if (tapFullscreen) onFullscreen() }) {
         AndroidView(
             factory = { c ->
                 PlayerView(c).apply {
