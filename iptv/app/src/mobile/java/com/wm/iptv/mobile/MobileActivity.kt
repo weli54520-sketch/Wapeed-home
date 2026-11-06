@@ -1,6 +1,8 @@
 package com.wm.iptv.mobile
 
 import android.os.Bundle
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -250,11 +252,13 @@ private fun FloatingBar(nav: Navigator, current: Route) {
     val haptic = LocalHapticFeedback.current
     var dragging by remember { mutableStateOf(false) }
     var dragPx by remember { mutableFloatStateOf(0f) }
-    var releasedFrom by remember { mutableStateOf<Float?>(null) }
+    val scope = rememberCoroutineScope()
+    // محرّك واحد فقط للفقاعة (مصدر الحقيقة الوحيد): للسحب بزنبرك سريع، وللاستقرار بزنبرك ناعم
     val bubbleX = remember { Animatable(0f) }
+    // أول ما يظهر الشريط (حتى بعد ما يختفي ويرجع مع التمرير) الفقاعة تبدأ مباشرة مكان القسم الحالي بدون انزلاق
+    var placed by remember { mutableStateOf(false) }
     val press by animateFloatAsState(if (dragging) 1f else 0f, spring(dampingRatio = 0.7f, stiffness = 500f), label = "press")
-    // الفقاعة تلحق إصبعك بنعومة سريعة (تتبّع شبه فوري)
-    val follow = animateFloatAsState(dragPx, spring(dampingRatio = 0.9f, stiffness = 1500f), label = "follow")
+    val dragSpec = remember { spring<Float>(dampingRatio = 0.9f, stiffness = 1500f) }
 
     Box(Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp).fillMaxWidth()) {
         BoxWithConstraints(
@@ -271,14 +275,14 @@ private fun FloatingBar(nav: Navigator, current: Route) {
             val itemW = maxWidth / tabs.size
             val wpx = with(density) { itemW.toPx() }
             val maxPx = wpx * (tabs.size - 1)
-            val bubblePx = if (dragging) follow.value else bubbleX.value
+            val bubblePx = if (!placed && !dragging) index * wpx else bubbleX.value
             val shownIndex = if (dragging && wpx > 0f) (dragPx / wpx).roundToInt().coerceIn(0, tabs.size - 1) else index
 
-            // الفقاعة ترجع/تروح للقسم الحالي بنعومة (ومن مكان ما تركتها لو كنت تسحب)
+            // الفقاعة تثبت على القسم الحالي (أول مرة بدون حركة، وبعدها بنعومة من مكانها الحالي)
             LaunchedEffect(index, wpx, dragging) {
                 if (dragging || wpx <= 0f) return@LaunchedEffect
-                releasedFrom?.let { bubbleX.snapTo(it); releasedFrom = null }
-                bubbleX.animateTo(index * wpx, spring(dampingRatio = 0.78f, stiffness = 420f))
+                if (!placed) { bubbleX.snapTo(index * wpx); placed = true }
+                else bubbleX.animateTo(index * wpx, spring(dampingRatio = 0.78f, stiffness = 420f))
             }
             // اهتزاز خفيف كل ما تعدي على قسم أثناء السحب
             LaunchedEffect(shownIndex) { if (dragging) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
@@ -286,7 +290,6 @@ private fun FloatingBar(nav: Navigator, current: Route) {
             fun finishDrag() {
                 if (!dragging) return
                 val target = (dragPx / wpx).roundToInt().coerceIn(0, tabs.size - 1)
-                releasedFrom = follow.value
                 dragging = false
                 val r = tabs[target].route
                 // نقارن بالقسم الحالي الفعلي (مو القيمة القديمة المحفوظة داخل الإيماءة)
@@ -301,9 +304,12 @@ private fun FloatingBar(nav: Navigator, current: Route) {
                         fun target(x: Float) = ((if (rtl) size.width - x else x) - wpx / 2f).coerceIn(0f, maxPx)
                         dragPx = target(down.position.x)
                         dragging = true
+                        placed = true
+                        scope.launch { bubbleX.animateTo(dragPx, dragSpec) }
                         drag(down.id) { change ->
                             change.consume()
                             dragPx = target(change.position.x)
+                            scope.launch { bubbleX.animateTo(dragPx, dragSpec) }
                         }
                         // رفعت إصبعك: تثبت على أقرب قسم وتنتقل له (والضغطة العادية تنتقل لنفس القسم اللي ضغطته)
                         finishDrag()
