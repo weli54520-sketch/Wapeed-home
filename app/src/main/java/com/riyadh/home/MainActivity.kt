@@ -137,8 +137,8 @@ class WmAmbient(c: Context, initial: Int) : View(c) {
             builtBase = base
         }
         if (g1 == null || w != builtW || h != builtH) {
-            g1 = RadialGradient(0f, 0f, w * 0.6f, intArrayOf(Color.argb(40, 255, 255, 255), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
-            g2 = RadialGradient(0f, 0f, w * 0.5f, intArrayOf(Color.argb(30, 255, 255, 255), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
+            g1 = RadialGradient(0f, 0f, w * 0.6f, intArrayOf(Color.argb(120, 255, 255, 255), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
+            g2 = RadialGradient(0f, 0f, w * 0.5f, intArrayOf(Color.argb(80, 255, 255, 255), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
             p1.shader = g1
             p2.shader = g2
             tintFilter = null
@@ -155,9 +155,9 @@ class WmAmbient(c: Context, initial: Int) : View(c) {
         val dy = Math.cos(phase.toDouble()).toFloat() * h * 0.02f
         paint.shader = bgShader
         cv.drawRect(0f, 0f, w, h, paint)
-        m1.setTranslate(w * 0.25f + dx, h * 0.15f + dy); g1?.setLocalMatrix(m1)
+        m1.setTranslate(w * 0.62f + dx, h * 0.62f + dy); g1?.setLocalMatrix(m1)
         cv.drawRect(0f, 0f, w, h, p1)
-        m2.setTranslate(w * 0.85f - dx, h * 0.2f - dy); g2?.setLocalMatrix(m2)
+        m2.setTranslate(w * 0.12f - dx, h * 0.12f - dy); g2?.setLocalMatrix(m2)
         cv.drawRect(0f, 0f, w, h, p2)
     }
 }
@@ -678,6 +678,13 @@ class MainActivity : Activity() {
     private lateinit var heroGreetTv: TextView
     private lateinit var heroClockTv: TextView
     private lateinit var heroDateTv: TextView
+    private lateinit var heroKickerTv: TextView
+    private lateinit var heroTitleTv: TextView
+    private lateinit var heroSubTv: TextView
+    private lateinit var statusTempTv: TextView
+    private lateinit var statusPrayerTv: TextView
+    private lateinit var statusWeatherIcon: WmWeatherIcon
+    private var heroKey = ""
     private lateinit var clockTv: TextView
     private lateinit var dateLineTv: TextView
     private lateinit var tempTv: TextView
@@ -967,7 +974,7 @@ class MainActivity : Activity() {
                 }
             }
         } else if (currentPage == 0 && reorderingPkg == null && event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN &&
-            ::favRow.isInitialized && favRow.hasFocus() && pBool("show_all_apps", true)) {
+            bottomHomeFocused() && pBool("show_all_apps", true)) {
             if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) openDrawer()
             return true
         }
@@ -1229,7 +1236,7 @@ class MainActivity : Activity() {
             navPillLabel.layoutParams = navPillLabel.layoutParams.also { it.width = ViewGroup.LayoutParams.WRAP_CONTENT }
             navPillLabel.alpha = 1f
         }
-        if (::clockCluster.isInitialized) clockCluster.visibility = View.GONE
+        if (::clockCluster.isInitialized) clockCluster.visibility = View.VISIBLE
     }
 
     private fun pillBg(focused: Boolean): Drawable =
@@ -1484,38 +1491,27 @@ class MainActivity : Activity() {
             setPadding(dp(4), dp(2), dp(4), dp(10))
         }
 
-        val rightCluster = LinearLayout(this).unclip().apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.START
-        }
-        greetingTv = tv(11f, true, dim).apply {
-            text = "مساء الخير"
-            letterSpacing = 0.08f
-            setPadding(dp(2), 0, dp(2), 0)
-            visibility = if (pBool("show_greeting", true)) View.VISIBLE else View.GONE
-        }
-        val clockLine = LinearLayout(this).unclip().apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        clockTv = tv(38f, true, Color.WHITE).apply {
-            includeFontPadding = false
-        }
-        val vSep = View(this).apply {
-            background = solidCard(Color.argb(80, 255, 255, 255), 2)
-        }
-        dateLineTv = tv(12.5f, true, dim).apply {
+        greetingTv = tv(11f, true, dim).apply { text = "مساء الخير" }
+        clockTv = tv(24f, true, Color.WHITE).apply { includeFontPadding = false }
+        dateLineTv = tv(11.5f, true, dim).apply {
             maxLines = 2
             setLineSpacing(0f, 1.1f)
         }
-        clockLine.addView(clockTv)
-        clockLine.addView(vSep, LinearLayout.LayoutParams(dp(2), dp(28)).apply {
-            marginStart = dp(14)
-            marginEnd = dp(14)
-        })
-        clockLine.addView(dateLineTv)
-        rightCluster.addView(greetingTv)
-        rightCluster.addView(clockLine)
+        statusWeatherIcon = WmWeatherIcon(this).also { it.setState(wCat, wDay) }
+        statusTempTv = tv(18f, true, Color.WHITE).apply { text = nd(wTemp); includeFontPadding = false }
+        statusPrayerTv = tv(13f, true, dim).apply { maxLines = 1 }
+        fun sep() = View(this).apply { background = solidCard(Color.argb(70, 255, 255, 255), 2) }
+        val rightCluster = LinearLayout(this).unclip().apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(statusWeatherIcon, LinearLayout.LayoutParams(dp(26), dp(26)))
+            addView(statusTempTv, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(6) })
+            addView(sep(), LinearLayout.LayoutParams(dp(1), dp(22)).apply { marginStart = dp(14); marginEnd = dp(14) })
+            addView(statusPrayerTv)
+            addView(sep(), LinearLayout.LayoutParams(dp(1), dp(22)).apply { marginStart = dp(14); marginEnd = dp(14) })
+            addView(clockTv)
+            addView(dateLineTv, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(10) })
+        }
         clockCluster = rightCluster
         h.addView(buildNavPill(), LinearLayout.LayoutParams(-2, -2).apply {
             gravity = Gravity.TOP
@@ -1629,35 +1625,46 @@ class MainActivity : Activity() {
 
     // التحية والساعة الكبيرة والتاريخ (مثل المعاينة). حجم الساعة يتكيّف مع المساحة المتاحة
     private fun buildHero(): View {
-        heroGreetTv = tv(17f, false, Color.argb(175, 255, 255, 255)).apply {
-            letterSpacing = 0.02f
-            visibility = if (pBool("show_greeting", true)) View.VISIBLE else View.GONE
-        }
-        heroClockTv = tv(64f, false, Color.WHITE).apply {
+        heroKey = ""
+        heroKickerTv = tv(13f, true, Color.argb(165, 255, 255, 255)).apply { letterSpacing = 0.04f }
+        heroTitleTv = tv(52f, true, Color.WHITE).apply {
             includeFontPadding = false
-            typeface = Typeface.create("sans-serif-light", Typeface.NORMAL)
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            setShadowLayer(dp(14).toFloat(), 0f, dp(4).toFloat(), Color.argb(90, 0, 0, 0))
         }
-        heroDateTv = tv(15f, false, Color.argb(160, 255, 255, 255)).apply {
-            maxLines = 2
-            setLineSpacing(0f, 1.1f)
-        }
+        heroSubTv = tv(15f, false, Color.argb(165, 255, 255, 255)).apply { maxLines = 1 }
         val box = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(8), 0, dp(8), 0)
-            addView(heroGreetTv)
-            addView(heroClockTv, LinearLayout.LayoutParams(-2, -2).apply {
-                topMargin = dp(2)
-                bottomMargin = dp(2)
-            })
-            addView(heroDateTv)
+            addView(heroKickerTv)
+            addView(heroTitleTv, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(2); bottomMargin = dp(2) })
+            addView(heroSubTv)
         }
         return FrameLayout(this).unclip().apply {
             addView(box, FrameLayout.LayoutParams(-2, -2, Gravity.START or Gravity.CENTER_VERTICAL))
             addOnLayoutChangeListener { _, _, t, _, b, _, _, _, _ ->
-                val px = ((b - t) * 0.46f).coerceIn(dp(32).toFloat(), dp(72).toFloat())
-                if (Math.abs(heroClockTv.textSize - px) > 1.5f) heroClockTv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, px)
+                val px = ((b - t) * 0.5f).coerceIn(dp(34).toFloat(), dp(58).toFloat())
+                if (Math.abs(heroTitleTv.textSize - px) > 1.5f) heroTitleTv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, px)
             }
         }
+    }
+
+    // يغيّر نص الواجهة الكبيرة حسب العنصر المحدد (تطبيق أو مباراة) بتلاشي ناعم
+    private fun setHero(key: String, kicker: String, title: String, sub: String) {
+        if (!::heroTitleTv.isInitialized || key == heroKey) return
+        val first = heroKey.isEmpty()
+        heroKey = key
+        val box = heroTitleTv.parent as? View ?: return
+        box.animate().cancel()
+        if (first) {
+            heroKickerTv.text = kicker; heroTitleTv.text = title; heroSubTv.text = sub
+            return
+        }
+        box.animate().alpha(0f).translationY(dp(6).toFloat()).setDuration(110).withEndAction {
+            heroKickerTv.text = kicker; heroTitleTv.text = title; heroSubTv.text = sub
+            box.animate().alpha(1f).translationY(0f).setDuration(180).start()
+        }.start()
     }
 
     private fun buildHomePage(): View {
@@ -1722,61 +1729,25 @@ class MainActivity : Activity() {
         }
         prayerCol.addView(prayerTimerTv)
 
-        // 3. مباريات اليوم (مقصوصة داخل حدودها)
-        val matchesCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = solidCard(Color.argb(15, 255, 255, 255), 22, Color.argb(23, 255, 255, 255), 1); setPadding(dp(18), dp(10), dp(18), dp(4)) }
-        val mHead = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val mTitles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        mTitles.addView(tv(10.5f, true, Color.argb(150, 255, 255, 255)).apply { text = "نتائج ومواعيد مباشرة" })
-        mTitles.addView(tv(15f, true, Color.WHITE).apply { text = "مباريات اليوم"; setPadding(0, dp(2), 0, 0) })
-        mHead.addView(mTitles)
-        tickerTv = tv(11f, false, dim).apply {
-            setSingleLine(true)
-            ellipsize = TextUtils.TruncateAt.MARQUEE
-            marqueeRepeatLimit = -1
-            isSelected = true
-            gravity = Gravity.CENTER_VERTICAL or Gravity.START
-            setPadding(dp(14), 0, dp(8), 0)
-            visibility = if (pBool("show_ticker", true)) View.VISIBLE else View.GONE
-        }
-        mHead.addView(tickerTv, LinearLayout.LayoutParams(0, -2, 1f))
-        matchesCol.addView(mHead, LinearLayout.LayoutParams(-1, -2))
+        // 3. مباريات اليوم: بطاقات زجاجية بدون صندوق حولها
+        tickerTv = tv(11f, false, dim).apply { setSingleLine(true); visibility = View.GONE } // الشريط المتحرك يُستبدل بالأخبار لاحقاً
         homeMatchRow = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(6), dp(10), dp(6), dp(10))
+            setPadding(dp(4), dp(8), dp(4), dp(10))
         }
-        val matchScroll = HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            overScrollMode = View.OVER_SCROLL_NEVER
-            clipChildren = true
-            clipToPadding = false
-            addView(homeMatchRow)
-        }
-        matchesCol.addView(matchScroll, LinearLayout.LayoutParams(-1, -2))
-
-        val showW = pBool("show_weather", true)
-        val showP = pBool("show_prayers", true)
-        val showM = pBool("show_matches", true)
-        val midRow = LinearLayout(this).unclip().apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        midRow.addView(buildHero(), LinearLayout.LayoutParams(0, -1, 1f))
-        if (showW) midRow.addView(weatherCol, LinearLayout.LayoutParams(dp(230), -2).apply { marginStart = dp(14) })
-        if (showP) midRow.addView(prayerCol, LinearLayout.LayoutParams(dp(250), -2).apply { marginStart = dp(14) })
-        col.addView(midRow, LinearLayout.LayoutParams(-1, 0, 1f).apply { bottomMargin = dp(10) })
-        if (showM) col.addView(matchesCol, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
-
-        // المفضلة (Dock) في أسفل الشاشة
-        val dock = LinearLayout(this).apply {
+        val matchesSec = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.VERTICAL
-            background = slateGlass(210, 30, Color.argb(45, 255, 255, 255), 1)
-            setPadding(dp(18), dp(10), dp(18), dp(8))
-            roundOutline(30)
+            addView(tv(15f, true, Color.WHITE).apply { text = "مباريات اليوم"; setPadding(dp(8), 0, dp(8), dp(2)) })
+            addView(HorizontalScrollView(this@MainActivity).apply {
+                isHorizontalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_NEVER
+                clipToPadding = false
+                addView(homeMatchRow)
+            }, LinearLayout.LayoutParams(-1, -2))
         }
+
+        // 4. المفضلة: بدون صندوق، الاسم يظهر تحت الأيقونة المحددة فقط
         reorderHintTv = tv(12.5f, true, gold).apply {
             text = "↔️  وضع تحريك التطبيق: استخدم الأسهم (يمين / يسار) لتغيير المكان، ثم اضغط (موافق OK) للتثبيت"
             gravity = Gravity.CENTER
@@ -1784,32 +1755,35 @@ class MainActivity : Activity() {
             setPadding(dp(16), dp(6), dp(16), dp(6))
             visibility = View.GONE
         }
-        dock.addView(tv(15f, true, Color.WHITE).apply {
-            text = "المفضلة"
-            setPadding(dp(6), dp(2), dp(6), dp(2))
-        }, LinearLayout.LayoutParams(-1, -2))
-        dock.addView(reorderHintTv, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
         favRow = LinearLayout(this).unclip().apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(14), dp(16), dp(8))
+            setPadding(dp(8), dp(12), dp(8), dp(6))
             layoutTransition = LayoutTransition().apply { setDuration(180) }
         }
-        dock.addView(HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-            overScrollMode = View.OVER_SCROLL_NEVER
-            clipChildren = true
-            clipToPadding = false
-            addView(favRow)
-        }, LinearLayout.LayoutParams(-1, -2))
+        val favSec = LinearLayout(this).unclip().apply {
+            orientation = LinearLayout.VERTICAL
+            addView(tv(15f, true, Color.WHITE).apply { text = "المفضلة"; setPadding(dp(8), 0, dp(8), 0) }, LinearLayout.LayoutParams(-1, -2))
+            addView(reorderHintTv, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
+            addView(HorizontalScrollView(this@MainActivity).apply {
+                isHorizontalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_NEVER
+                clipToPadding = false
+                addView(favRow)
+            }, LinearLayout.LayoutParams(-1, -2))
+        }
+
+        val showM = pBool("show_matches", true)
+        col.addView(buildHero(), LinearLayout.LayoutParams(-1, 0, 1f))
+        col.addView(favSec, LinearLayout.LayoutParams(-1, -2))
+        if (showM) col.addView(matchesSec, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2) })
         if (pBool("show_all_apps", true)) {
-            dock.addView(tv(10.5f, true, Color.argb(130, 255, 255, 255)).apply {
+            col.addView(tv(10.5f, true, Color.argb(130, 255, 255, 255)).apply {
                 text = "▼   جميع التطبيقات"
                 gravity = Gravity.CENTER
                 letterSpacing = 0.05f
             }, LinearLayout.LayoutParams(-1, -2))
         }
-        col.addView(dock, LinearLayout.LayoutParams(-1, -2))
         return col
     }
 
@@ -1872,6 +1846,13 @@ class MainActivity : Activity() {
     }
 
     private fun firstTile(group: ViewGroup): View? = (group.getChildAt(0) as? ViewGroup)?.getChildAt(0)
+
+    // آخر صف قابل للتركيز في الرئيسية: المباريات إن وُجدت بطاقات، وإلا المفضلة
+    private fun bottomHomeFocused(): Boolean {
+        if (!::favRow.isInitialized || !::homeMatchRow.isInitialized) return false
+        val hasCards = homeMatchRow.childCount > 0 && homeMatchRow.getChildAt(0).isFocusable
+        return if (hasCards) homeMatchRow.hasFocus() else favRow.hasFocus()
+    }
 
     private fun openDrawer() {
         if (drawerOpen || !::drawerView.isInitialized) return
@@ -3407,7 +3388,7 @@ class MainActivity : Activity() {
             return
         }
         for (m in list) {
-            homeMatchRow.addView(miniMatch(m), LinearLayout.LayoutParams(dp(176), dp(132)).apply { marginEnd = dp(10) })
+            homeMatchRow.addView(miniMatch(m), LinearLayout.LayoutParams(dp(236), dp(108)).apply { marginEnd = dp(12) })
         }
         val w = (resources.displayMetrics.widthPixels - dp(68) - dp(44) - 3 * dp(20)) / 3
         for (m in list) {
@@ -3440,9 +3421,9 @@ class MainActivity : Activity() {
 
     // خلفية بطاقة المباراة: لون واحد شفاف خفيف + إطار رفيع (بدون طبقات داخلية)
     private fun miniCardBg(): Drawable = GradientDrawable().apply {
-        setColor(Color.argb(26, 255, 255, 255))
-        cornerRadius = dp(20).toFloat()
-        setStroke(dp(1), Color.argb(48, 255, 255, 255))
+        setColor(Color.argb(34, 255, 255, 255))
+        cornerRadius = dp(22).toFloat()
+        setStroke(dp(1), Color.argb(60, 255, 255, 255))
     }
 
     private fun miniMatch(m: Match): View {
@@ -3456,8 +3437,12 @@ class MainActivity : Activity() {
             outlineProvider = null // بدون ظل: الظل كان يبان من خلف الزجاج كمربع داخلي
             setOnClickListener { showPage(1) }
             setOnFocusChangeListener { v, f ->
-                v.background = if (f) focusBg(20) else miniCardBg()
+                v.background = if (f) focusBg(22) else miniCardBg()
                 v.translationZ = if (f) dp(10).toFloat() else 0f
+                if (f) {
+                    setHero("m:${m.home}${m.away}", "مباراة اليوم • ${m.league}", "${m.home} × ${m.away}", statusText(m))
+                    ambient.glow(Color.rgb(70, 100, 190))
+                }
                 v.animate()
                     .scaleX(if (f) focusScale() else 1f)
                     .scaleY(if (f) focusScale() else 1f)
@@ -3848,6 +3833,7 @@ class MainActivity : Activity() {
             ellipsize = TextUtils.TruncateAt.END
             gravity = Gravity.CENTER
             setPadding(dp(4), dp(7), dp(4), 0)
+            alpha = if (isDock && !isMovingThis) 0f else 1f
         }
 
         val idleB = solidCard(Color.TRANSPARENT, 20, Color.argb(45, 255, 255, 255), 1)
@@ -3897,6 +3883,8 @@ class MainActivity : Activity() {
                     }
                 )
                 titleTv.text = if (movingNow) "◀  $label  ▶" else label
+                if (isDock) titleTv.animate().alpha(if (f || movingNow) 1f else 0f).setDuration(140).start()
+                if (f && isDock) setHero("a:$pkg", "المفضلة", label, "اضغط موافق للفتح")
 
                 val targetScale = when {
                     movingNow -> focusScale() + 0.03f
@@ -3986,11 +3974,6 @@ class MainActivity : Activity() {
             val m = LocalDate.now().format(DateTimeFormatter.ofPattern("d MMMM", dateLoc()))
             val h = try { HijrahDate.now().format(DateTimeFormatter.ofPattern("d MMMM yyyy هـ", ar)) } catch (e: Throwable) { "" }
             dateLineTv.text = nd(if (h.isNotEmpty()) "$day $m\n$h" else "$day $m")
-            if (::heroClockTv.isInitialized) {
-                heroGreetTv.text = greetingTv.text
-                heroClockTv.text = clockTv.text
-                heroDateTv.text = dateLineTv.text
-            }
 
             if (now.minute != lastMin) {
                 lastMin = now.minute
@@ -4005,6 +3988,7 @@ class MainActivity : Activity() {
     private fun applyWeather() {
         if (!::tempTv.isInitialized) return
         tempTv.text = nd(wTemp)
+        if (::statusTempTv.isInitialized) { statusTempTv.text = nd(wTemp); statusWeatherIcon.setState(wCat, wDay) }
         if (::weatherIcon.isInitialized) weatherIcon.setState(wCat, wDay)
         weatherStatusTv.text = wStatus
         weatherSubTv.text = nd(wSub)
@@ -4064,5 +4048,6 @@ class MainActivity : Activity() {
         val hh = mins / 60
         val mm = mins % 60
         prayerTimerTv.text = nd("الأذان القادم بعد ${if (hh > 0) "$hh س و " else ""}$mm د")
+        if (::statusPrayerTv.isInitialized) statusPrayerTv.text = nd("${prayersData[next].name} بعد ${if (hh > 0) "$hh س " else ""}$mm د")
     }
 }
