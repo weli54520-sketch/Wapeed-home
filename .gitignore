@@ -1,0 +1,11 @@
+# ملفات البناء
+.gradle/
+build/
+app/build/
+*.apk
+# المفتاح يتولّد وقت البناء من build.gradle، لا يدخل المستودع
+app/wm-key.jks
+# إعدادات المحرر والجهاز
+local.properties
+*.iml
+.idea/

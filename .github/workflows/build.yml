@@ -4,8 +4,6 @@ on:
     paths-ignore:
       - 'iptv/**'
       - '.github/workflows/iptv.yml'
-      - 'tube/**'
-      - '.github/workflows/pages.yml'
       - '**.md'
   workflow_dispatch:
 permissions:
