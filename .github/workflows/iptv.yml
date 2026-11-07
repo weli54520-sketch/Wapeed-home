@@ -3,6 +3,7 @@ on:
   push:
     paths:
       - 'iptv/**'
+      - '!iptv/**/*.md'
       - '.github/workflows/iptv.yml'
   workflow_dispatch:
 permissions:
