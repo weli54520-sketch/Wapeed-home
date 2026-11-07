@@ -153,6 +153,12 @@ private fun VodOverlay(vm: PlayerVm) {
                 // شريط التقدم (من اليسار لليمين عشان زر اليمين = تقديم)
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                     Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 56.dp).padding(bottom = 24.dp)) {
+                        // زر الحلقة التالية (مثل الجوال): يطلع فوق شريط التقدم لو فيه حلقة بعدها
+                        if (vm.nextEp != null && vm.countdown < 0) {
+                            Row(Modifier.fillMaxWidth().padding(bottom = 14.dp), horizontalArrangement = Arrangement.End) {
+                                NextEpisodePill(vm.nextFocus)
+                            }
+                        }
                         SeekBar(vm)
                         Spacer(Modifier.height(10.dp))
                         Row(Modifier.fillMaxWidth()) {
@@ -163,9 +169,13 @@ private fun VodOverlay(vm: PlayerVm) {
                         Spacer(Modifier.height(14.dp))
                         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(26.dp, Alignment.CenterHorizontally)) {
-                                if (vm.barMode) {
+                                if (vm.nextFocus) {
+                                    Hint("OK", "تشغيل الحلقة التالية")
+                                    Hint("▲", "رجوع")
+                                } else if (vm.barMode) {
                                     Hint("◀ ▶", "٥ دقايق")
                                     Hint("OK", if (vm.seekTarget != null) "تأكيد" else "تشغيل / إيقاف")
+                                    if (vm.nextEp != null && vm.countdown < 0) Hint("▼", "الحلقة التالية")
                                     Hint("▲", "رجوع للتقديم بالثواني")
                                 } else {
                                     Hint("◀ ▶", "ضغطة = ٥ ثواني")
@@ -218,6 +228,22 @@ private fun VodOverlay(vm: PlayerVm) {
                 Text("OK تشغيل الآن  ·  رجوع إلغاء", fontSize = 13.sp, color = C.Text3)
             }
         }
+    }
+}
+
+/** زر "الحلقة التالية": زجاجي، ويصير أبيض لما التركيز عليه */
+@Composable
+private fun NextEpisodePill(focused: Boolean) {
+    val shape = RoundedCornerShape(999.dp)
+    Row(
+        Modifier.background(if (focused) Color.White else Color(0x66000000), shape)
+            .border(1.dp, if (focused) Color.White else Color(0x40FFFFFF), shape)
+            .padding(horizontal = 22.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        val fg = if (focused) C.Bg else Color.White
+        Icon(Ico.Next, null, tint = fg, modifier = Modifier.size(18.dp))
+        Text("الحلقة التالية", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = fg)
     }
 }
 

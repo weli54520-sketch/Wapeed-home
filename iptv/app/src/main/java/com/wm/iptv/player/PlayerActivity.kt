@@ -110,6 +110,8 @@ class PlayerVm {
     var countdown by mutableIntStateOf(-1)
     // نزلت على شريط التقدم: يمين ويسار = ٥ دقايق
     var barMode by mutableStateOf(false)
+    /** التركيز على زر "الحلقة التالية" (من شريط التقدم: نزول مرة ثانية) */
+    var nextFocus by mutableStateOf(false)
 }
 
 @OptIn(UnstableApi::class)
@@ -293,7 +295,7 @@ open class PlayerActivity : ComponentActivity() {
         contentId = e.id; ext = e.ext; season = e.season; epNum = e.number
         image = e.image.ifBlank { cover }
         vm.subtitle = "الموسم $season · الحلقة $epNum"
-        vm.nextEp = null; vm.countdown = -1; nextDismissed = false
+        vm.nextEp = null; vm.countdown = -1; nextDismissed = false; vm.nextFocus = false
         player.stop()
         startCurrent(if (p != null && !p.finished) p.position else 0L)
     }
@@ -367,7 +369,7 @@ open class PlayerActivity : ComponentActivity() {
                     checkNextEpisode()
                 }
                 val now = SystemClock.uptimeMillis()
-                if (vm.overlay && vm.playing && vm.seekTarget == null && vm.panel == null && now - lastInteraction > (if (vm.barMode) 7000 else 4500)) { vm.overlay = false; vm.barMode = false }
+                if (vm.overlay && vm.playing && vm.seekTarget == null && vm.panel == null && now - lastInteraction > (if (vm.barMode) 7000 else 4500)) { vm.overlay = false; vm.barMode = false; vm.nextFocus = false }
                 if (vm.banner && vm.panel == null && vm.zapPreview == null && now - lastInteraction > 5000) vm.banner = false
                 // البث علّق في التحميل فترة طويلة
                 if (vm.isLive && bufferingSince > 0 && now - bufferingSince > 15_000) { bufferingSince = 0L; reconnect("البث علّق") }
@@ -460,6 +462,7 @@ open class PlayerActivity : ComponentActivity() {
             if (!up) return true
             when {
                 vm.seekTarget != null -> cancelSeek()
+                vm.nextFocus -> { vm.nextFocus = false; touch() }
                 vm.barMode -> { vm.barMode = false; touch() }
                 vm.countdown >= 0 -> { nextDismissed = true; vm.countdown = -1 }
                 vm.digits.isNotEmpty() -> { digitsJob?.cancel(); vm.digits = "" }
@@ -477,11 +480,12 @@ open class PlayerActivity : ComponentActivity() {
     private fun vodKey(code: Int, ev: KeyEvent, down: Boolean): Boolean {
         val up = ev.action == KeyEvent.ACTION_UP
         when (code) {
-            KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> { if (down) seekPress(+1, ev) else if (up) scheduleCommit(650); return true }
-            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_MEDIA_REWIND -> { if (down) seekPress(-1, ev) else if (up) scheduleCommit(650); return true }
+            KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> { if (vm.nextFocus) vm.nextFocus = false; if (down) seekPress(+1, ev) else if (up) scheduleCommit(650); return true }
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_MEDIA_REWIND -> { if (vm.nextFocus) vm.nextFocus = false; if (down) seekPress(-1, ev) else if (up) scheduleCommit(650); return true }
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
                 if (!up) return true
                 when {
+                    vm.nextFocus -> { vm.nextFocus = false; playNextEpisode() }
                     vm.countdown >= 0 -> playNextEpisode()
                     vm.message != null && !vm.buffering -> { retries = 0; reconnectJob?.cancel(); reconnect("إعادة المحاولة") }
                     vm.seekTarget != null -> commitSeek()
@@ -495,13 +499,18 @@ open class PlayerActivity : ComponentActivity() {
             KeyEvent.KEYCODE_MEDIA_NEXT -> { if (up) playNextEpisode(); return true }
             KeyEvent.KEYCODE_DPAD_UP -> {
                 // من الشريط: يرجع للتقديم بالثواني. غير كذا: الصوت والترجمة
-                if (up) { if (vm.barMode) { commitIfPending(); vm.barMode = false } else { vm.panel = Panel.TRACKS; vm.overlay = true }; touch() }
+                if (up) { if (vm.nextFocus) vm.nextFocus = false else if (vm.barMode) { commitIfPending(); vm.barMode = false } else { vm.panel = Panel.TRACKS; vm.overlay = true }; touch() }
                 return true
             }
             KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_CAPTIONS -> { if (up) { vm.panel = Panel.TRACKS; vm.overlay = true; touch() }; return true }
             KeyEvent.KEYCODE_DPAD_DOWN -> {
                 // ينزل على شريط التقدم
-                if (up) { if (!vm.barMode) { commitIfPending(); vm.barMode = true }; vm.overlay = true; touch() }
+                if (up) {
+                    // من شريط التقدم: نزول مرة ثانية يروح لزر "الحلقة التالية" (لو فيه حلقة بعدها)
+                    if (vm.barMode && vm.nextEp != null && vm.countdown < 0 && !vm.nextFocus) vm.nextFocus = true
+                    else if (!vm.barMode) { commitIfPending(); vm.barMode = true }
+                    vm.overlay = true; touch()
+                }
                 return true
             }
             KeyEvent.KEYCODE_INFO -> { if (up) { vm.overlay = !vm.overlay || !vm.playing; touch() }; return true }
