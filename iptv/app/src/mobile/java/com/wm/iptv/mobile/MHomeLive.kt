@@ -1,6 +1,24 @@
 package com.wm.iptv.mobile
 
 import android.widget.Toast
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.produceState
+import coil.imageLoader
+import coil.request.ImageRequest
+import com.wm.iptv.data.Catalog
+import com.wm.iptv.data.Series
+import com.wm.iptv.data.SportMatch
+import com.wm.iptv.data.Sports
+import com.wm.iptv.ui.Art
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -75,7 +93,6 @@ import com.wm.iptv.data.Repo
 import com.wm.iptv.data.TextNorm
 import com.wm.iptv.data.VodInfo
 import com.wm.iptv.player.PlayerLauncher
-import com.wm.iptv.ui.Art
 import com.wm.iptv.ui.C
 import com.wm.iptv.ui.Ico
 import com.wm.iptv.ui.Navigator
@@ -89,20 +106,26 @@ import kotlinx.coroutines.delay
 
 // ───────────────────────── الرئيسية ─────────────────────────
 
+/**
+ * الرئيسية: واجهة تسحبها يمين ويسار بين أحدث الأفلام، ثم صفوف مرتبة بحسب أهميتها لك.
+ * الواجهة قسم مستقل بحالته، فسحبها ما يعيد رسم الصفحة كلها.
+ */
 @Composable
 fun MHomeScreen(nav: Navigator) {
     val catalog by Repo.catalog.collectAsState()
     val version by Repo.version.collectAsState()
     val ctx = LocalContext.current
 
-    val hero: Movie? = remember(catalog) { catalog.recentMovies.firstOrNull { it.icon.isNotBlank() } ?: catalog.recentMovies.firstOrNull() }
-    var heroInfo by remember { mutableStateOf<VodInfo?>(null) }
-    LaunchedEffect(hero?.id) { heroInfo = hero?.let { Repo.vodInfo(it.id) } }
-
     val cont = remember(version) { Repo.store.allProgress().filter { !it.finished && it.fraction > 0.01f }.take(20) }
     val favCh = remember(version, catalog) { Repo.store.favoriteOrder(Kind.LIVE).mapNotNull { catalog.channelById[it] }.take(30) }
+    val lastCh = remember(version, catalog) { catalog.channelById[Repo.store.lastChannel] }
     val favMovies = remember(version, catalog) { Repo.store.favoriteOrder(Kind.MOVIE).mapNotNull { catalog.movieById[it] }.take(30) }
     val favSeries = remember(version, catalog) { Repo.store.favoriteOrder(Kind.SERIES).mapNotNull { catalog.seriesById[it] }.take(30) }
+    // الأعلى تقييماً: الفرز في خيط خلفي عشان ما يوقف الواجهة
+    val tops by produceState(Pair<List<Movie>, List<Series>>(emptyList(), emptyList()), catalog) {
+        value = withContext(Dispatchers.Default) { catalog.topMovies to catalog.topSeries }
+    }
+    val weekAgo = remember { System.currentTimeMillis() / 1000 - 7 * 86400 }
     val expiry = remember(version) {
         Repo.store.userInfo()?.expDate?.let { exp ->
             val days = ((exp * 1000 - System.currentTimeMillis()) / 86_400_000L).toInt()
@@ -111,34 +134,15 @@ fun MHomeScreen(nav: Navigator) {
     }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp + LocalBarSpace.current)) {
-        item {
+        item(key = "head") {
             MHeader("Waleed TV") { MRefreshButton(); MIconButton(Ico.Gear, "الإعدادات") { nav.go(Route.Settings) } }
         }
-        if (expiry != null) item {
+        if (expiry != null) item(key = "expiry") {
             Text(expiry, color = C.Star, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 18.dp))
         }
-        if (hero != null) item {
-            val p = remember(version) { Repo.store.progress("m:${hero.id}") }
-            Box(
-                Modifier.padding(horizontal = 18.dp, vertical = 8.dp).fillMaxWidth().aspectRatio(16f / 10f)
-                    .clip(RoundedCornerShape(18.dp)).tap { nav.go(Route.MovieDetail(hero.id)) }
-            ) {
-                Art(heroInfo?.backdrop?.takeIf { it.isNotBlank() } ?: hero.icon, hero.id, "")
-                Box(Modifier.matchParentSize().background(Brush.verticalGradient(0.35f to Color.Transparent, 1f to Color(0xF20A0A0C))))
-                Column(Modifier.align(Alignment.BottomStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("المضاف حديثاً", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = C.Accent)
-                    Text(hero.name, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    val meta = listOfNotNull(heroInfo?.year?.takeIf { it.isNotBlank() }, heroInfo?.genre?.takeIf { it.isNotBlank() }).joinToString(" · ")
-                    if (meta.isNotEmpty()) Text(meta, fontSize = 13.sp, color = C.Text2, maxLines = 1)
-                    Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        MPill(if (p != null && !p.finished && p.position > 0) "أكمل" else "تشغيل", icon = Ico.Play, primary = true,
-                            onClick = { PlayerLauncher.movie(ctx, hero, if (p != null && !p.finished) p.position else 0L) })
-                        MPill("التفاصيل", onClick = { nav.go(Route.MovieDetail(hero.id)) })
-                    }
-                }
-            }
-        }
-        if (cont.isNotEmpty()) item {
+        item(key = "hero") { MHero(nav, catalog, version) }
+
+        if (cont.isNotEmpty()) item(key = "cont") {
             MSection("أكمل المشاهدة") {
                 items(cont, key = { it.key }) { p ->
                     MLandscape(p.title, if (p.subtitle.isNotEmpty()) "${p.subtitle} · ${remainingText(p)}" else remainingText(p), p.image, p.key.hashCode(),
@@ -148,38 +152,163 @@ fun MHomeScreen(nav: Navigator) {
                 }
             }
         }
-        if (favCh.isNotEmpty()) item {
-            MSection("قنواتك المفضلة") {
-                items(favCh, key = { it.id }) { ch ->
-                    MLandscape(ch.name, "", ch.icon, ch.id, width = 160.dp, fit = true, onClick = { PlayerLauncher.live(ctx, ch.id, LiveKeys.FAV) })
+
+        item(key = "matches") { MMatchesRow(nav) }
+
+        if (favCh.isNotEmpty() || lastCh != null) item(key = "live") {
+            MSection("قنواتك") {
+                // اختصار: آخر قناة شاهدتها أول بطاقة
+                if (lastCh != null) item(key = "last_${lastCh.id}") {
+                    MLandscape(lastCh.name, "آخر قناة شاهدتها", lastCh.icon, lastCh.id, width = 170.dp, fit = true,
+                        onClick = { PlayerLauncher.live(ctx, lastCh.id, LiveKeys.RECENT) })
+                }
+                items(favCh.filter { it.id != lastCh?.id }, key = { it.id }) { ch ->
+                    MLandscape(ch.name, "", ch.icon, ch.id, width = 170.dp, fit = true, onClick = { PlayerLauncher.live(ctx, ch.id, LiveKeys.FAV) })
                 }
             }
         }
-        if (catalog.recentMovies.isNotEmpty()) item {
+
+        if (catalog.recentMovies.isNotEmpty()) item(key = "rm") {
             MSection("أفلام مضافة حديثاً") {
                 items(catalog.recentMovies.take(40), key = { it.id }) { m ->
-                    MPoster(m.name, m.icon, m.id, width = 116.dp, onClick = { nav.go(Route.MovieDetail(m.id)) })
+                    MPoster(m.name, m.icon, m.id, width = 116.dp, badge = if (m.added > weekAgo) "جديد" else null,
+                        onClick = { nav.go(Route.MovieDetail(m.id)) })
                 }
             }
         }
-        if (catalog.recentSeries.isNotEmpty()) item {
+        if (catalog.recentSeries.isNotEmpty()) item(key = "rs") {
             MSection("مسلسلات محدثة") {
                 items(catalog.recentSeries.take(40), key = { it.id }) { s ->
-                    MPoster(s.name, s.cover, s.id, width = 116.dp, onClick = { nav.go(Route.SeriesDetail(s.id)) })
+                    MPoster(s.name, s.cover, s.id, width = 116.dp, badge = if (s.updated > weekAgo) "حلقات جديدة" else null,
+                        onClick = { nav.go(Route.SeriesDetail(s.id)) })
                 }
             }
         }
-        if (favMovies.isNotEmpty()) item {
+        if (tops.second.isNotEmpty()) item(key = "ts") {
+            MSection("أهم المسلسلات") {
+                items(tops.second, key = { it.id }) { s ->
+                    MPoster(s.name, s.cover, s.id, width = 116.dp, badge = "★ ${s.rating}", onClick = { nav.go(Route.SeriesDetail(s.id)) })
+                }
+            }
+        }
+        if (tops.first.isNotEmpty()) item(key = "tm") {
+            MSection("الأعلى تقييماً") {
+                items(tops.first, key = { it.id }) { m ->
+                    MPoster(m.name, m.icon, m.id, width = 116.dp, badge = "★ ${m.rating}", onClick = { nav.go(Route.MovieDetail(m.id)) })
+                }
+            }
+        }
+        if (favMovies.isNotEmpty()) item(key = "fm") {
             MSection("أفلامي المفضلة") {
                 items(favMovies, key = { it.id }) { m -> MPoster(m.name, m.icon, m.id, width = 116.dp, onClick = { nav.go(Route.MovieDetail(m.id)) }) }
             }
         }
-        if (favSeries.isNotEmpty()) item {
+        if (favSeries.isNotEmpty()) item(key = "fs") {
             MSection("مسلسلاتي المفضلة") {
                 items(favSeries, key = { it.id }) { s -> MPoster(s.name, s.cover, s.id, width = 116.dp, onClick = { nav.go(Route.SeriesDetail(s.id)) }) }
             }
         }
-        if (catalog.isEmpty) item { MEmpty("جارٍ التحميل…") }
+        if (catalog.isEmpty) item(key = "empty") { MEmpty("جارٍ التحميل…") }
+    }
+}
+
+/** الواجهة: بطاقات أحدث الأفلام تسحبها يمين ويسار، ونقاط تحتها تبين وين أنت */
+@kotlin.OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun MHero(nav: Navigator, catalog: Catalog, version: Int) {
+    val ctx = LocalContext.current
+    val heroes = remember(catalog) { catalog.recentMovies.filter { it.icon.isNotBlank() }.take(8).ifEmpty { catalog.recentMovies.take(1) } }
+    if (heroes.isEmpty()) return
+    val pager = rememberPagerState(pageCount = { heroes.size })
+    val infos = remember(catalog) { mutableStateMapOf<Int, VodInfo>() }
+
+    // معلومات الفيلم الحالي + اللي بعده (وصورة خلفيته تنزل مسبقاً عشان السحب يكون ناعم)
+    LaunchedEffect(pager.currentPage, heroes) {
+        for (i in listOf(pager.currentPage, pager.currentPage + 1)) {
+            val m = heroes.getOrNull(i) ?: continue
+            if (infos[m.id] == null) Repo.vodInfo(m.id)?.let { info ->
+                infos[m.id] = info
+                val url = info.backdrop.takeIf { it.isNotBlank() } ?: m.icon
+                if (url.isNotBlank()) ctx.imageLoader.enqueue(ImageRequest.Builder(ctx).data(url).build())
+            }
+        }
+    }
+
+    Column(Modifier.padding(top = 8.dp, bottom = 4.dp)) {
+        HorizontalPager(pager, contentPadding = PaddingValues(horizontal = 18.dp), pageSpacing = 12.dp) { page ->
+            val m = heroes[page]
+            val info = infos[m.id]
+            val p = remember(version, m.id) { Repo.store.progress("m:${m.id}") }
+            Box(
+                Modifier.fillMaxWidth().aspectRatio(16f / 10f).clip(RoundedCornerShape(20.dp)).tap { nav.go(Route.MovieDetail(m.id)) }
+            ) {
+                Art(info?.backdrop?.takeIf { it.isNotBlank() } ?: m.icon, m.id, "")
+                Box(Modifier.matchParentSize().background(Brush.verticalGradient(0.35f to Color.Transparent, 1f to Color(0xF20A0A0C))))
+                Column(Modifier.align(Alignment.BottomStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("المضاف حديثاً", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = C.Accent)
+                    Text(m.name, fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    val meta = listOfNotNull(info?.year?.takeIf { it.isNotBlank() }, info?.genre?.takeIf { it.isNotBlank() }).joinToString(" · ")
+                    if (meta.isNotEmpty()) Text(meta, fontSize = 13.sp, color = C.Text2, maxLines = 1)
+                    Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        MPill(if (p != null && !p.finished && p.position > 0) "أكمل" else "تشغيل", icon = Ico.Play, primary = true,
+                            onClick = { PlayerLauncher.movie(ctx, m, if (p != null && !p.finished) p.position else 0L) })
+                        MPill("التفاصيل", onClick = { nav.go(Route.MovieDetail(m.id)) })
+                    }
+                }
+            }
+        }
+        if (heroes.size > 1) Row(Modifier.align(Alignment.CenterHorizontally).padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            repeat(heroes.size) { i ->
+                val on = i == pager.currentPage
+                Box(Modifier.size(width = if (on) 18.dp else 6.dp, height = 6.dp)
+                    .background(if (on) Color.White else Color.White.copy(alpha = 0.3f), RoundedCornerShape(3.dp)))
+            }
+        }
+    }
+}
+
+private val matchTimeFmt = DateTimeFormatter.ofPattern("h:mm a", Locale("ar"))
+private fun matchClock(ms: Long): String = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).format(matchTimeFmt)
+
+/** مباريات اليوم: بطاقات تتمرر أفقياً، تضغط وتفتح المباشر. يختفي الصف لو ما فيه مباريات. */
+@Composable
+private fun MMatchesRow(nav: Navigator) {
+    var matches by remember { mutableStateOf(Sports.cached()) }
+    LaunchedEffect(Unit) { while (true) { matches = Sports.today(); delay(120_000) } }
+    if (matches.isEmpty()) return
+    MSection("مباريات اليوم") {
+        items(matches.take(12), key = { it.id }) { m -> MMatchCard(m) { nav.go(Route.Live) } }
+    }
+}
+
+@Composable
+private fun MMatchCard(m: SportMatch, onClick: () -> Unit) {
+    Column(
+        Modifier.width(220.dp).clip(RoundedCornerShape(16.dp))
+            .background(Brush.verticalGradient(listOf(Color(0x33FFFFFF), Color(0x14FFFFFF))))
+            .tap(onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (m.live) { Box(Modifier.size(7.dp).clip(CircleShape).background(C.Live)); Spacer(Modifier.width(6.dp)) }
+            Text(m.league, fontSize = 11.sp, color = C.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Text(if (m.score.isNotEmpty()) m.score else matchClock(m.startMs), fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                color = if (m.live) C.Live else C.Text)
+        }
+        MMatchTeam(m.home, m.homeLogo)
+        MMatchTeam(m.away, m.awayLogo)
+    }
+}
+
+@Composable
+private fun MMatchTeam(name: String, logo: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+            if (logo.isNotBlank()) AsyncImage(logo, null, contentScale = ContentScale.Fit, modifier = Modifier.size(22.dp))
+            else Text(name.take(1), fontSize = 12.sp, color = C.Muted)
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(name, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
