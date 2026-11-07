@@ -61,6 +61,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -184,17 +185,22 @@ fun MHomeScreen(nav: Navigator) {
                 }
             }
         }
+        // أفضل 10 (بحسب تقييم المزوّد): أرقام كبيرة بجنب البوسترات
         if (tops.second.isNotEmpty()) item(key = "ts") {
-            MSection("أهم المسلسلات") {
-                items(tops.second, key = { it.id }) { s ->
-                    MPoster(s.name, s.cover, s.id, width = 116.dp, badge = "★ ${s.rating}", onClick = { nav.go(Route.SeriesDetail(s.id)) })
+            MSection("أفضل 10 مسلسلات تقييماً") {
+                itemsIndexed(tops.second.take(10), key = { _, s -> s.id }) { i, s ->
+                    MRanked(i + 1) {
+                        MPoster(s.name, s.cover, s.id, width = 116.dp, badge = "★ ${s.rating}", onClick = { nav.go(Route.SeriesDetail(s.id)) })
+                    }
                 }
             }
         }
         if (tops.first.isNotEmpty()) item(key = "tm") {
-            MSection("الأعلى تقييماً") {
-                items(tops.first, key = { it.id }) { m ->
-                    MPoster(m.name, m.icon, m.id, width = 116.dp, badge = "★ ${m.rating}", onClick = { nav.go(Route.MovieDetail(m.id)) })
+            MSection("أفضل 10 أفلام تقييماً") {
+                itemsIndexed(tops.first.take(10), key = { _, m -> m.id }) { i, m ->
+                    MRanked(i + 1) {
+                        MPoster(m.name, m.icon, m.id, width = 116.dp, badge = "★ ${m.rating}", onClick = { nav.go(Route.MovieDetail(m.id)) })
+                    }
                 }
             }
         }
@@ -209,6 +215,18 @@ fun MHomeScreen(nav: Navigator) {
             }
         }
         if (catalog.isEmpty) item(key = "empty") { MEmpty("جارٍ التحميل…") }
+    }
+}
+
+/** رقم الترتيب الكبير بجنب البطاقة (نص ثابت فقط = خفيف) */
+@Composable
+private fun MRanked(rank: Int, content: @Composable () -> Unit) {
+    Row(verticalAlignment = Alignment.Bottom) {
+        Text(
+            "$rank", fontSize = 84.sp, fontWeight = FontWeight.Bold, lineHeight = 84.sp, letterSpacing = (-5).sp,
+            color = Color.White.copy(alpha = 0.2f), modifier = Modifier.padding(end = 2.dp, bottom = 20.dp),
+        )
+        content()
     }
 }
 

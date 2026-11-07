@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -160,20 +161,25 @@ fun HomeScreen(nav: Navigator) {
             }
         }
 
+        // أفضل 10 (بحسب تقييم المزوّد): أرقام كبيرة بجنب البوسترات
         if (tops.second.isNotEmpty()) item(key = "ts") {
-            Section("أهم المسلسلات") {
-                items(tops.second, key = { it.id }) { s ->
-                    Poster(s.name, s.cover, s.id, badge = "★ ${s.rating}", focusMod = Modifier.track(mem, "ts_${s.id}"),
-                        onClick = { nav.go(Route.SeriesDetail(s.id)) })
+            Section("أفضل 10 مسلسلات تقييماً") {
+                itemsIndexed(tops.second.take(10), key = { _, s -> s.id }) { i, s ->
+                    Ranked(i + 1) {
+                        Poster(s.name, s.cover, s.id, badge = "★ ${s.rating}", focusMod = Modifier.track(mem, "ts_${s.id}"),
+                            onClick = { nav.go(Route.SeriesDetail(s.id)) })
+                    }
                 }
             }
         }
 
         if (tops.first.isNotEmpty()) item(key = "tm") {
-            Section("الأعلى تقييماً") {
-                items(tops.first, key = { it.id }) { m ->
-                    Poster(m.name, m.icon, m.id, badge = "★ ${m.rating}", focusMod = Modifier.track(mem, "tm_${m.id}"),
-                        onClick = { nav.go(Route.MovieDetail(m.id)) })
+            Section("أفضل 10 أفلام تقييماً") {
+                itemsIndexed(tops.first.take(10), key = { _, m -> m.id }) { i, m ->
+                    Ranked(i + 1) {
+                        Poster(m.name, m.icon, m.id, badge = "★ ${m.rating}", focusMod = Modifier.track(mem, "tm_${m.id}"),
+                            onClick = { nav.go(Route.MovieDetail(m.id)) })
+                    }
                 }
             }
         }
@@ -206,6 +212,18 @@ private fun Section(title: String, content: LazyListScope.() -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(RowGap),
             content = content,
         )
+    }
+}
+
+/** رقم الترتيب الكبير بجنب البطاقة (نص ثابت فقط = خفيف) */
+@Composable
+private fun Ranked(rank: Int, content: @Composable () -> Unit) {
+    Row(verticalAlignment = Alignment.Bottom) {
+        Text(
+            "$rank", fontSize = 104.sp, fontWeight = FontWeight.Bold, lineHeight = 104.sp, letterSpacing = (-6).sp,
+            color = Color.White.copy(alpha = 0.2f), modifier = Modifier.padding(end = 2.dp, bottom = 26.dp),
+        )
+        content()
     }
 }
 
