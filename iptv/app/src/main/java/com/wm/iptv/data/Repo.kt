@@ -93,6 +93,16 @@ object Repo {
         if (_catalog.value.isEmpty) _catalog.value = readCache(a)
     }
 
+    /**
+     * نحسب الفرز والتجميع الثقيل (الأحدث، الأعلى تقييماً، الفهارس) هنا في الخلفية،
+     * عشان الواجهة ما تحسبها بنفسها أول ما تفتح الرئيسية وتوقف على أجهزة التلفزيون الضعيفة.
+     */
+    private fun warm(c: Catalog) {
+        c.channelById; c.movieById; c.seriesById
+        c.moviesByCat; c.seriesByCat; c.channelsByCat
+        c.recentMovies; c.recentSeries; c.topMovies; c.topSeries
+    }
+
     private fun readCache(a: Account): Catalog {
         val d = dir(a)
         return try {
@@ -103,7 +113,7 @@ object Repo {
                 channels = CatalogParser.channels(File(d, "live.json")),
                 movies = CatalogParser.movies(File(d, "vod.json")),
                 series = CatalogParser.series(File(d, "series.json")),
-            )
+            ).also { warm(it) }
         } catch (e: Exception) {
             Catalog()
         }

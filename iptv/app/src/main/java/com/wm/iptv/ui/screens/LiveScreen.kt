@@ -133,7 +133,7 @@ fun LiveScreen(nav: Navigator) {
     LaunchedEffect(focusedCh?.id) {
         val ch = focusedCh ?: return@LaunchedEffect
         if (!Repo.store.livePreview) return@LaunchedEffect
-        delay(650)
+        delay(900)
         previewCh = ch
     }
 

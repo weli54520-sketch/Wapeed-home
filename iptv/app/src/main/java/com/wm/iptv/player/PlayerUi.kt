@@ -395,6 +395,10 @@ internal fun TracksPanel(vm: PlayerVm, act: PlayerActivity) {
             Modifier.align(Alignment.CenterEnd).width(420.dp).fillMaxHeight().background(Color(0xF2111114)),
             contentPadding = PaddingValues(horizontal = 18.dp, vertical = 26.dp), verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
+            // اختصار: الحلقة التالية في أي وقت (للمسلسلات اللي بعدها حلقة)
+            if (vm.nextEp != null) item {
+                SideItem("الحلقة التالية", icon = Ico.Next, onClick = { vm.panel = null; act.nextEpisodeNow() })
+            }
             item { PanelHeader("الصوت") }
             if (audio.isEmpty()) item { Text("مسار واحد", color = C.Muted, fontSize = 14.sp, modifier = Modifier.padding(14.dp)) }
             audio.forEach { g ->
