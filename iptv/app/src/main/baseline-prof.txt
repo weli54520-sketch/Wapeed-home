@@ -1,0 +1,8 @@
+# Baseline profile (يدوي): يخلي أندرويد يجهّز كود الواجهة مسبقاً عند التثبيت،
+# فيقل التقطيع في أول فتح وأول تنقل على الأجهزة الضعيفة.
+HSPLandroidx/compose/**;->**(**)**
+HSPLandroidx/lifecycle/**;->**(**)**
+HSPLcom/wm/iptv/**;->**(**)**
+Landroidx/compose/**;
+Landroidx/lifecycle/**;
+Lcom/wm/iptv/**;
