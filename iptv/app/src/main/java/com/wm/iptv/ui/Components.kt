@@ -150,11 +150,14 @@ fun FocusBox(
     // عشان ما يتراكم حمل الرسم على أجهزة التلفزيون الضعيفة.
     val scale by animateFloatAsState(if (focused) focusScale else 1f, tween(110), label = "s")
     Box(
+        // مهم: التركيز والضغط يجون قبل التكبير (graphicsLayer). لو التكبير قبلهم، النظام يشوف البطاقة المكبّرة
+        // "أكبر من مكانها" فيحرّك الصفحة شوي عشان يوضحها كلها، وهذا اللي كان يسبب اهتزاز الصفحة لفوق وتحت
+        // مع كل انتقال بين البطاقات. بهالترتيب مكانها للنظام ثابت، والتكبير مجرد رسم.
         modifier
-            .graphicsLayer { scaleX = scale; scaleY = scale }
-            .then(if (elevate && focused) Modifier.shadow(14.dp, shape, clip = false, ambientColor = Color.Black, spotColor = Color.Black) else Modifier)
             .onFocusChanged { focused = it.isFocused; onFocus?.invoke(it.isFocused) }
             .onSelect(onClick, onLongClick)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .then(if (elevate && focused) Modifier.shadow(14.dp, shape, clip = false, ambientColor = Color.Black, spotColor = Color.Black) else Modifier)
             .clip(shape)
     ) {
         content(focused)
